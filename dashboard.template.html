@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="600">
+<!-- auto-reload is done in JS with a cache-buster (see bottom): GitHub Pages caches the page for 10 min, and a plain meta refresh would re-serve the cached copy -->
 <title>Support Watch</title>
 <style>
   :root { --bg:#f0f0f1; --card:#fff; --fg:#1d2327; --muted:#666; --line:#ccd0d4; --line2:#e2e4e7; --head:#f0f0f1;
@@ -145,6 +145,8 @@ document.getElementById('problems').onchange = render;
 document.getElementById('hidequiet').onchange = render;
 sel.onchange = render;
 render();
+// Reload every 10 min with a fresh query string so the CDN cache (max-age 600 on GitHub Pages) is bypassed.
+setTimeout(() => location.replace(location.pathname + '?r=' + Date.now()), 600e3);
 </script>
 </body>
 </html>
