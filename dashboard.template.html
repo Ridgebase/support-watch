@@ -43,6 +43,8 @@
   tr.warn { background:var(--warnbg); }
   tr.ok   { background:var(--okbg); }
   tr.off  { color:var(--muted); }
+  button.copy { border:1px solid var(--line); background:var(--card); color:var(--muted); border-radius:4px; padding:0 5px; margin-left:6px; cursor:pointer; font-size:12px; line-height:18px; vertical-align:middle; }
+  button.copy:hover { color:var(--fg); }
   @media (max-width: 700px) { .stat, .last { border-left:0; padding-left:0; text-align:left; } }
 </style>
 </head>
@@ -60,7 +62,8 @@
 const data = __DATA__;
 const STALE_MS = 3600e3;   // the collector runs every 10 min; an hour without a snapshot means it is down
 const latest = data.snapshots;
-const summary = data.flows.map(f => ({ client:f.Client, env:f.Environment, flow:f.Flow, enabled:String(f.Enabled).toLowerCase() !== 'false', trigger:f.Trigger || '', runs:+f.Runs, failed:+f.Failed, last:f.Last || '', lastStatus:f.LastStatus }));
+const summary = data.flows.map(f => ({ client:f.Client, env:f.Environment, flow:f.Flow, enabled:String(f.Enabled).toLowerCase() !== 'false', trigger:f.Trigger || '', runs:+f.Runs, failed:+f.Failed, last:f.Last || '', lastStatus:f.LastStatus,
+  url: f.EnvironmentId && f.FlowId ? `https://make.powerautomate.com/environments/${f.EnvironmentId}/flows/${f.FlowId}/details` : '' }));
 const sum = (arr, k) => arr.reduce((n, r) => n + (+r[k] || 0), 0);
 // Colour = what the last run says. Red: last run failed. Yellow: recovered, but failures in the window (or runs unreadable).
 // Green: no failure in the window. Disabled flows are muted, flows with 0 runs are neutral (and hidden by default).
@@ -122,7 +125,7 @@ function render() {
   const list = summary.filter(f => (!client || f.client === client) && (!only || problem(f)) && (!hideQuiet || f.runs > 0))
     .sort((a, b) => rank[cls(a)] - rank[cls(b)] || b.failed - a.failed || a.client.localeCompare(b.client) || a.flow.localeCompare(b.flow));
   h += `<h2>Flows <span class="muted">(${list.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Flow</th><th>Trigger</th><th>Enabled</th><th class="num">Runs</th><th class="num">Failed</th><th>Last run</th><th>Last status</th></tr></thead><tbody>`;
-  for (const f of list) h += `<tr class="${cls(f)}"><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td>${esc(f.flow)}</td><td>${esc(trig(f))}</td><td>${f.enabled ? 'Yes' : 'No'}</td><td class="num">${f.runs}</td><td class="num">${f.failed}</td><td>${fmt(f.last)}</td><td class="${statusClass(f.lastStatus)}">${esc(f.lastStatus)}</td></tr>`;
+  for (const f of list) h += `<tr class="${cls(f)}"><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td>${esc(f.flow)}${f.url ? ` <button class="copy" data-url="${esc(f.url)}" title="Copy the flow's Power Automate URL">⧉</button>` : ''}</td><td>${esc(trig(f))}</td><td>${f.enabled ? 'Yes' : 'No'}</td><td class="num">${f.runs}</td><td class="num">${f.failed}</td><td>${fmt(f.last)}</td><td class="${statusClass(f.lastStatus)}">${esc(f.lastStatus)}</td></tr>`;
   h += '</tbody></table></div>';
 
   const fails = data.fails.filter(r => !client || r.Client === client).sort((a, b) => b.Start.localeCompare(a.Start)).slice(0, 50);
@@ -133,6 +136,11 @@ function render() {
   }
   document.getElementById('out').innerHTML = h;
 }
+// Copy button: writes the flow's URL to the clipboard and shows a check mark for a moment.
+document.getElementById('out').addEventListener('click', e => {
+  const b = e.target.closest('button.copy'); if (!b) return;
+  navigator.clipboard.writeText(b.dataset.url).then(() => { b.textContent = '✓'; setTimeout(() => b.textContent = '⧉', 1200); });
+});
 document.getElementById('problems').onchange = render;
 document.getElementById('hidequiet').onchange = render;
 sel.onchange = render;
