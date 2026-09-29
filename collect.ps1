@@ -16,8 +16,12 @@ $ver      = 'api-version=2016-11-01'
 $clients  = $env:CLIENTS_JSON | ConvertFrom-Json
 if (-not $clients) { throw 'CLIENTS_JSON is empty.' }
 
-$collected = (Get-Date).ToString('s')
-$since     = (Get-Date).AddDays(-$Days)
+# All times on the page are Eastern (the clients' and the laptop collector's zone). GitHub runners are on UTC, so every
+# timestamp is converted explicitly; comparisons stay in UTC. The API returns startTime as UTC ISO strings.
+$tz        = [TimeZoneInfo]::FindSystemTimeZoneById('America/Toronto')
+$nowUtc    = [datetime]::UtcNow
+$collected = [TimeZoneInfo]::ConvertTimeFromUtc($nowUtc, $tz).ToString('s')
+$since     = $nowUtc.AddDays(-$Days)
 $rows      = [System.Collections.Generic.List[object]]::new()
 $failures  = @()
 $blocked   = @()   # clients whose sign-in failed this run
@@ -54,21 +58,22 @@ foreach ($c in $clients) {
         $flows = @(Get-All "$api/environments/$($env['name'])/flows?$ver" $h)
         # One runs request per flow, in parallel. Runs come newest first: stop paging once a page ends before the window.
         $flowRows = $flows | ForEach-Object -ThrottleLimit $Parallel -Parallel {
-            $flow = $_; $api = $using:api; $ver = $using:ver; $h = $using:h; $since = $using:since; $envId = ($using:env)['name']
+            $flow = $_; $api = $using:api; $ver = $using:ver; $h = $using:h; $since = $using:since; $tz = $using:tz; $envId = ($using:env)['name']
+            $utc = { param($s) [datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
             $url = "$api/environments/$envId/flows/$($flow['name'])/runs?$ver"; $runs = @(); $status = $null
             try {
                 while ($url) {
                     $r = (Invoke-WebRequest -Uri $url -Headers $h).Content | ConvertFrom-Json -AsHashtable
                     $runs += $r['value']; $url = $r['nextLink']
-                    if ($runs.Count -and [datetime]$runs[-1]['properties']['startTime'] -lt $since) { break }
+                    if ($runs.Count -and (& $utc $runs[-1]['properties']['startTime']) -lt $since) { break }
                 }
-                $runs = @($runs | Where-Object { [datetime]$_['properties']['startTime'] -ge $since })
+                $runs = @($runs | Where-Object { (& $utc $_['properties']['startTime']) -ge $since })
             } catch { $status = 'UNREADABLE' }
             $tr = try { $t = $flow['properties']['definitionSummary']['triggers'][0]; "$($t['type'])/$($t['kind'])" } catch { '' }
             $base = @{ Flow = $flow['properties']['displayName']; FlowId = $flow['name']; Enabled = ($flow['properties']['state'] -eq 'Started'); Trigger = $tr }
             if ($status)             { [pscustomobject]($base + @{ Start = ''; Status = $status }) }
             elseif ($runs.Count -eq 0) { [pscustomobject]($base + @{ Start = ''; Status = 'NO_RUNS' }) }
-            else { foreach ($run in $runs) { [pscustomobject]($base + @{ Start = ([datetime]$run['properties']['startTime']).ToString('s'); Status = $run['properties']['status'] }) } }
+            else { foreach ($run in $runs) { [pscustomobject]($base + @{ Start = [TimeZoneInfo]::ConvertTimeFromUtc((& $utc $run['properties']['startTime']), $tz).ToString('s'); Status = $run['properties']['status'] }) } }
         }
         foreach ($fr in $flowRows) {
             $rows.Add([pscustomobject]@{ Collected = $collected; Client = $c.Name; Environment = $env['properties']['displayName']; Flow = $fr.Flow; FlowId = $fr.FlowId; Enabled = $fr.Enabled; Trigger = $fr.Trigger; Start = $fr.Start; Status = $fr.Status })
