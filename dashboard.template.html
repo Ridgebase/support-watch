@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="600">
+<title>Support Watch</title>
+<style>
+  :root { --bg:#f0f0f1; --card:#fff; --fg:#1d2327; --muted:#666; --line:#ccd0d4; --line2:#e2e4e7; --head:#f0f0f1;
+          --ok:#2e7d32; --warn:#e65100; --bad:#c62828; --grey:#666;
+          --okbg:#e8f5e9; --warnbg:#fff4e5; --badbg:#fdecea; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --card:#1b1b1b; --fg:#eee; --muted:#999; --line:#333; --line2:#2a2a2a; --head:#222;
+          --ok:#81c784; --warn:#ffb74d; --bad:#ef9a9a; --grey:#999; --okbg:#14301a; --warnbg:#3a2a10; --badbg:#3a1a18; } }
+  body { margin:0; padding:16px; font:13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); }
+  h1 { font-size:20px; margin:0 0 4px; }
+  h2 { font-size:15px; margin:24px 0 8px; }
+  .muted { color:var(--muted); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:6px; }
+  .controls { margin:12px 0; }
+  .controls label { margin-right:16px; }
+  .health { display:flex; align-items:center; gap:24px; padding:16px; margin-bottom:20px; flex-wrap:wrap; }
+  .health .status { text-align:center; min-width:80px; }
+  .dot { width:16px; height:16px; border-radius:50%; display:inline-block; }
+  .status b { display:block; font-size:14px; }
+  .kpi { flex:1; min-width:180px; }
+  .kpi .big { font-size:24px; font-weight:600; }
+  .stat { text-align:center; border-left:1px solid var(--line2); padding-left:24px; }
+  .stat .big { font-size:20px; font-weight:600; }
+  .stat small, .kpi small { color:var(--muted); font-size:12px; display:block; }
+  .last { border-left:1px solid var(--line2); padding-left:24px; font-size:13px; color:var(--muted); line-height:1.8; text-align:right; }
+  .last b { color:var(--fg); }
+  .c-ok { color:var(--ok); } .c-warn { color:var(--warn); } .c-bad { color:var(--bad); } .c-grey { color:var(--grey); }
+  .wrap { overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  thead tr { background:var(--head); border-bottom:1px solid var(--line); }
+  th, td { text-align:left; padding:8px 12px; white-space:nowrap; }
+  tbody tr { border-bottom:1px solid var(--line2); }
+  tbody tr:last-child { border-bottom:0; }
+  th { font-weight:600; }
+  .num { text-align:right; }
+  tr.today { font-weight:600; }
+  tr.bad  { background:var(--badbg); }
+  tr.warn { background:var(--warnbg); }
+  tr.ok   { background:var(--okbg); }
+  tr.off  { color:var(--muted); }
+  @media (max-width: 700px) { .stat, .last { border-left:0; padding-left:0; text-align:left; } }
+</style>
+</head>
+<body>
+<h1>Support Watch</h1>
+<p class="muted" id="meta"></p>
+<div class="controls">
+  <label>Client <select id="client"><option value="">All clients</option></select></label>
+  <label><input type="checkbox" id="problems"> Problems only</label>
+  <label><input type="checkbox" id="hidequiet" checked> Hide flows with 0 runs</label>
+</div>
+<div id="out"></div>
+<script>
+const rows = __DATA__;
+const STALE_MS = 3600e3;   // the collector runs every 10 min; an hour without a snapshot means it is down
+
+// Latest snapshot per client. Each run of flow-runs.ps1 is one snapshot (same Collected value).
+const latest = {};
+for (const r of rows) if (!latest[r.Client] || r.Collected > latest[r.Client]) latest[r.Client] = r.Collected;
+const current = rows.filter(r => r.Collected === latest[r.Client]);
+const isRun = r => r.Status !== 'NO_RUNS' && r.Status !== 'UNREADABLE';
+
+// One summary line per client/environment/flow.
+const flows = {};
+for (const r of current) {
+  const k = [r.Client, r.Environment, r.FlowId || r.Flow].join('\u0000');   // two flows can share a display name
+  const f = flows[k] ??= { client:r.Client, env:r.Environment, flow:r.Flow, enabled:String(r.Enabled).toLowerCase() !== 'false', trigger:r.Trigger || '', runs:0, failed:0, last:'', lastStatus:'NO_RUNS' };
+  if (!isRun(r)) { f.lastStatus = r.Status; continue; }
+  f.runs++;
+  if (r.Status === 'Failed') f.failed++;
+  if (r.Start > f.last) { f.last = r.Start; f.lastStatus = r.Status; }
+}
+const summary = Object.values(flows);
+// Colour = what the last run says. Red: last run failed. Yellow: recovered, but failures in the window (or runs unreadable).
+// Green: no failure in the window. Disabled flows are muted, flows with 0 runs are neutral (and hidden by default).
+const cls = f => !f.enabled ? 'off' : f.lastStatus === 'Failed' ? 'bad' : (f.failed > 0 || f.lastStatus === 'UNREADABLE') ? 'warn' : f.runs > 0 ? 'ok' : '';
+const problem = f => ['bad', 'warn'].includes(cls(f));
+const trig = f => ({ 'Recurrence/': 'Schedule', 'OpenApiConnectionWebhook/': 'Event', 'OpenApiConnection/': 'Polling', 'Request/Button': 'Button', 'Request/PowerApp': 'Power Apps', 'Request/Manual': 'Manual', 'Request/Http': 'HTTP', 'Request/ApiConnection': 'HTTP' })[f.trigger] || (f.trigger ? f.trigger.split('/')[0] : '');
+const fmt = iso => iso ? iso.replace('T', ' ').slice(0, 16) : '—';
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '—';
+const statusClass = s => s === 'Succeeded' ? 'c-ok' : s === 'Failed' ? 'c-bad' : s === 'Running' ? 'c-grey' : 'c-warn';
+const localDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;   // Start values are local time, so days must be too
+
+const sel = document.getElementById('client');
+for (const c of Object.keys(latest).sort()) sel.append(new Option(c, c));
+document.getElementById('meta').innerHTML =
+  // STALE = the scheduled task has not run for an hour: the page is old, not the flows.
+  Object.entries(latest).map(([c, t]) => `${esc(c)}: snapshot ${fmt(t)}` + (Date.now() - new Date(t) > STALE_MS ? ' <b class="c-bad">STALE</b>' : '')).join(' · ') || 'No data yet. Run flow-runs.ps1 first.';
+
+function health(client) {
+  const fl = summary.filter(f => !client || f.client === client);
+  const cur = current.filter(r => (!client || r.Client === client) && isRun(r));
+  const clients = Object.keys(latest).filter(c => !client || c === client);
+  const stale = clients.some(c => Date.now() - new Date(latest[c]) > STALE_MS);
+  const red = fl.filter(f => cls(f) === 'bad').length, yellow = fl.filter(f => cls(f) === 'warn').length;
+  const today = localDate(new Date());
+  const todayRuns = cur.filter(r => r.Start.slice(0, 10) === today);
+  const tOk = todayRuns.filter(r => r.Status === 'Succeeded').length, tBad = todayRuns.filter(r => r.Status === 'Failed').length;
+  // Status follows today, like Koena's: Critical = a flow is failing right now (its latest run failed, whatever the day);
+  // Degraded = failures today but recovered; Healthy = clean today. Earlier-in-the-week failures stay visible as yellow rows only.
+  const [label, tone] = stale ? ['Stale data', 'grey'] : red ? ['Critical', 'bad'] : tBad ? ['Degraded', 'warn'] : cur.length ? ['Healthy', 'ok'] : ['Waiting', 'grey'];
+  const failed7 = cur.filter(r => r.Status === 'Failed').length;
+  // Last run per client: the most recent start in that client's snapshot.
+  const lastPer = clients.map(c => cur.filter(r => r.Client === c).sort((a, b) => b.Start.localeCompare(a.Start))[0]).filter(Boolean);
+  let h = `<div class="card health">
+    <div class="status"><span class="dot" style="background:var(--${tone})"></span><b class="c-${tone}">${label}</b></div>
+    <div class="kpi"><div class="big">${pct(tOk, tOk + tBad)}</div><small>Today's success rate (${tOk} / ${tOk + tBad} runs)</small></div>
+    <div class="stat"><div class="big">${cur.length}</div><small>Runs, last 7 days</small></div>
+    <div class="stat"><div class="big ${failed7 ? 'c-bad' : ''}">${failed7}</div><small>Failed, last 7 days</small></div>
+    <div class="stat"><div class="big ${red ? 'c-bad' : yellow ? 'c-warn' : ''}">${red + yellow}</div><small>Flows needing attention</small></div>
+    <div class="last">${lastPer.map(r => `<div>Last run${clients.length > 1 ? ' ' + esc(r.Client) : ''}: <b>${esc(r.Flow)}</b> · <b class="${statusClass(r.Status)}">${esc(r.Status)}</b> · ${fmt(r.Start)}</div>`).join('') || '<div>No runs yet</div>'}</div>
+  </div>`;
+
+  // Per-day table, last 7 days, today first.
+  const days = [...Array(7)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() - i); return localDate(d); });
+  h += '<div class="card wrap" style="margin-bottom:20px"><table><thead><tr><th>Date</th><th class="num">Runs</th><th class="num c-ok">Succeeded</th><th class="num c-bad">Failed</th><th class="num c-warn">Cancelled</th><th class="num">Rate</th></tr></thead><tbody>';
+  for (const d of days) {
+    const rs = cur.filter(r => r.Start.slice(0, 10) === d);
+    const ok = rs.filter(r => r.Status === 'Succeeded').length, bad = rs.filter(r => r.Status === 'Failed').length, can = rs.filter(r => r.Status === 'Cancelled').length;
+    h += `<tr class="${d === today ? 'today' : ''}"><td>${d === today ? 'Today' : d}</td><td class="num">${rs.length}</td><td class="num">${ok}</td><td class="num">${bad}</td><td class="num">${can}</td><td class="num">${pct(ok, ok + bad)}</td></tr>`;
+  }
+  return h + '</tbody></table></div>';
+}
+
+function render() {
+  const only = document.getElementById('problems').checked, hideQuiet = document.getElementById('hidequiet').checked, client = sel.value;
+  let h = health(client);
+
+  const rank = { bad: 0, warn: 1, ok: 2, '': 3, off: 4 };
+  const list = summary.filter(f => (!client || f.client === client) && (!only || problem(f)) && (!hideQuiet || f.runs > 0))
+    .sort((a, b) => rank[cls(a)] - rank[cls(b)] || b.failed - a.failed || a.client.localeCompare(b.client) || a.flow.localeCompare(b.flow));
+  h += `<h2>Flows <span class="muted">(${list.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Flow</th><th>Trigger</th><th>Enabled</th><th class="num">Runs</th><th class="num">Failed</th><th>Last run</th><th>Last status</th></tr></thead><tbody>`;
+  for (const f of list) h += `<tr class="${cls(f)}"><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td>${esc(f.flow)}</td><td>${esc(trig(f))}</td><td>${f.enabled ? 'Yes' : 'No'}</td><td class="num">${f.runs}</td><td class="num">${f.failed}</td><td>${fmt(f.last)}</td><td class="${statusClass(f.lastStatus)}">${esc(f.lastStatus)}</td></tr>`;
+  h += '</tbody></table></div>';
+
+  const fails = current.filter(r => r.Status === 'Failed' && (!client || r.Client === client)).sort((a, b) => b.Start.localeCompare(a.Start)).slice(0, 50);
+  if (fails.length) {
+    h += `<h2>Failed runs <span class="muted">(last 7 days)</span></h2><div class="card wrap"><table><thead><tr><th>When</th><th>Client</th><th>Environment</th><th>Flow</th></tr></thead><tbody>`;
+    for (const r of fails) h += `<tr><td>${fmt(r.Start)}</td><td>${esc(r.Client)}</td><td>${esc(r.Environment)}</td><td>${esc(r.Flow)}</td></tr>`;
+    h += '</tbody></table></div>';
+  }
+  document.getElementById('out').innerHTML = h;
+}
+document.getElementById('problems').onchange = render;
+document.getElementById('hidequiet').onchange = render;
+sel.onchange = render;
+render();
+</script>
+</body>
+</html>

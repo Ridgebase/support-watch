@@ -1,0 +1,44 @@
+name: Support Watch
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # GitHub may delay or skip a tick under load; the page shows STALE after 1 h without a snapshot
+  workflow_dispatch:
+
+# Public repo: scheduled workflows are disabled after 60 days without repo activity, so the job commits a
+# one-line marker once a day (see the last step). Secrets never touch the repo.
+permissions:
+  contents: write
+
+concurrency:
+  group: support-watch
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect flow runs, build and deploy the page
+        shell: pwsh
+        env:
+          CLIENTS_JSON:  ${{ secrets.CLIENTS_JSON }}
+          RT_SEMO:       ${{ secrets.RT_SEMO }}
+          RT_TSMO:       ${{ secrets.RT_TSMO }}
+          NETLIFY_TOKEN: ${{ secrets.NETLIFY_TOKEN }}
+        run: ./collect.ps1
+
+      - name: Keep the schedule alive (one commit a day)
+        if: always()
+        run: |
+          today=$(date -u +%F)
+          if [ "$(cat last-run.txt 2>/dev/null)" != "$today" ]; then
+            echo "$today" > last-run.txt
+            git config user.name  "support-watch bot"
+            git config user.email "support-watch@users.noreply.github.com"
+            git add last-run.txt
+            git commit -m "keepalive $today" -q
+            git push -q
+          fi
