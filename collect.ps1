@@ -20,6 +20,7 @@ $collected = (Get-Date).ToString('s')
 $since     = (Get-Date).AddDays(-$Days)
 $rows      = [System.Collections.Generic.List[object]]::new()
 $failures  = @()
+$blocked   = @()   # clients whose sign-in failed this run
 
 # -AsHashtable keeps keys case-sensitive: the Flow API returns keys differing only by case, which the default parser rejects.
 function Get-All($url, $headers, [scriptblock]$stopWhen) {
@@ -34,10 +35,13 @@ function Get-All($url, $headers, [scriptblock]$stopWhen) {
 
 foreach ($c in $clients) {
     $rt = [Environment]::GetEnvironmentVariable("RT_$($c.Name)")
-    if (-not $rt) { $failures += "$($c.Name): no RT_$($c.Name) secret"; continue }
+    if (-not $rt) { $failures += "$($c.Name): no RT_$($c.Name) secret"; $blocked += $c.Name; continue }
     try {
         $tok = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$($c.Tenant)/oauth2/v2.0/token" -Body @{ grant_type = 'refresh_token'; client_id = $clientId; refresh_token = $rt; scope = $scope }
-    } catch { $failures += "$($c.Name): token refresh failed ($($_.ErrorDetails.Message)) - rerun get-refresh-token.ps1 and update the RT_$($c.Name) secret"; continue }
+    } catch {
+        # AADSTS53003 = the tenant's Conditional Access blocks sign-ins from GitHub's servers (SEMO does). invalid_grant otherwise = token revoked: rerun get-refresh-token.ps1.
+        $failures += "$($c.Name): token refresh failed: $(($_.ErrorDetails.Message | ConvertFrom-Json).error_description)"; $blocked += $c.Name; continue
+    }
     $h = @{ Authorization = "Bearer $($tok.access_token)" }
 
     $all   = @(Get-All "$api/environments?$ver" $h)
@@ -73,9 +77,20 @@ foreach ($c in $clients) {
     Write-Host "$($c.Name): $($envs.Count) environment(s), $(@($rows | Where-Object Client -eq $c.Name).Count) rows"
 }
 
+# Carry-over: a client that could not be signed in keeps its rows from the live page (the laptop task also publishes there),
+# so it stays on the page with its old snapshot time and turns STALE after an hour instead of vanishing.
+if ($blocked) {
+    try {
+        $live = (Invoke-WebRequest 'https://support-watch.netlify.app/').Content
+        $old  = [regex]::Match($live, '(?m)^const rows = (\[.*\]);$').Groups[1].Value | ConvertFrom-Json
+        foreach ($name in $blocked) { $kept = @($old | Where-Object Client -eq $name); $kept | ForEach-Object { $rows.Add($_) }; Write-Host "$name`: carried over $($kept.Count) rows from the live page" }
+    } catch { $failures += "carry-over from the live page failed: $_" }
+}
+
 if ($rows.Count) {
     $rows | Export-Csv -Path "$PSScriptRoot/flow-runs.csv" -NoTypeInformation -Encoding UTF8
     & "$PSScriptRoot/build-dashboard.ps1"
 }
-# Fail the job (GitHub emails the repo owner) if any client could not be collected. The page was still deployed with what worked.
-if ($failures) { $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }; exit 1 }
+$failures | ForEach-Object { Write-Warning $_ }
+# Fail the job (GitHub emails the repo owner) only when nothing at all was collected: the collector itself is broken.
+if ($blocked.Count -eq @($clients).Count) { exit 1 }

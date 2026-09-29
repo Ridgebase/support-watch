@@ -10,8 +10,12 @@ Live page: https://support-watch.netlify.app (rebuilt every 10 minutes by the Gi
 - `collect.ps1` signs in to each client tenant with a **refresh token**, reads flows and their runs for the
   configured environments through the Flow REST API, and writes `flow-runs.csv`.
 - `build-dashboard.ps1` embeds that CSV into `dashboard.template.html` and pushes the result to Netlify.
-- `.github/workflows/watch.yml` runs both every 10 minutes. If a client cannot be collected the job fails
-  and GitHub emails the repo owner; the page is still deployed with the clients that worked.
+- `.github/workflows/watch.yml` runs both every 10 minutes. A client whose sign-in is refused keeps its rows from
+  the live page (and goes STALE on the page after an hour); the job only fails when no client at all could be collected.
+
+**Known limit:** Seguin Morris (SEMO) has a Conditional Access policy that blocks sign-ins from GitHub's servers
+(AADSTS53003), while the same token works from a PC in Canada. Until their IT excludes the `integrateur-erp` account
+from that policy, SEMO data on the public page comes from the local Windows task (`flow-runs.ps1`) whenever that PC is on.
 
 All client-specific values live in GitHub secrets, nothing in this repo:
 
