@@ -25,7 +25,7 @@ $failures  = @()
 function Get-All($url, $headers, [scriptblock]$stopWhen) {
     $out = @()
     while ($url) {
-        $r = Invoke-RestMethod -Uri $url -Headers $headers | Out-String | ConvertFrom-Json -AsHashtable
+        $r = (Invoke-WebRequest -Uri $url -Headers $headers).Content | ConvertFrom-Json -AsHashtable
         $out += $r['value']; $url = $r['nextLink']
         if ($stopWhen -and $out.Count -and (& $stopWhen $out[-1])) { break }
     }
@@ -54,7 +54,7 @@ foreach ($c in $clients) {
             $url = "$api/environments/$envId/flows/$($flow['name'])/runs?$ver"; $runs = @(); $status = $null
             try {
                 while ($url) {
-                    $r = Invoke-RestMethod -Uri $url -Headers $h | Out-String | ConvertFrom-Json -AsHashtable
+                    $r = (Invoke-WebRequest -Uri $url -Headers $h).Content | ConvertFrom-Json -AsHashtable
                     $runs += $r['value']; $url = $r['nextLink']
                     if ($runs.Count -and [datetime]$runs[-1]['properties']['startTime'] -lt $since) { break }
                 }
