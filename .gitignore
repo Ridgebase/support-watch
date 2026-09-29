@@ -5,3 +5,6 @@ carry.json
 run.log
 # local-only Windows collector: holds client names, owner addresses and environment names
 flow-runs.ps1
+
+# old single-file output, superseded by site/
+dashboard.html
