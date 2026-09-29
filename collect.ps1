@@ -77,20 +77,25 @@ foreach ($c in $clients) {
     Write-Host "$($c.Name): $($envs.Count) environment(s), $(@($rows | Where-Object Client -eq $c.Name).Count) rows"
 }
 
-# Carry-over: a client that could not be signed in keeps its rows from the live page (the laptop task also publishes there),
-# so it stays on the page with its old snapshot time and turns STALE after an hour instead of vanishing.
-if ($blocked) {
+# Carry-over: a client that could not be signed in from here is taken from CARRY_URL, a data.json that the laptop
+# collector (flow-runs.ps1) publishes to a gist whenever it runs. Its snapshot time is kept, so the page shows STALE
+# for that client once the laptop has been off for an hour, instead of the client vanishing.
+Remove-Item "$PSScriptRoot/carry.json" -ErrorAction SilentlyContinue
+if ($blocked -and $env:CARRY_URL) {
     try {
-        $live = (Invoke-WebRequest 'https://support-watch.netlify.app/').Content
-        $old  = [regex]::Match($live, '(?m)^const rows = (\[.*\]);$').Groups[1].Value | ConvertFrom-Json
-        foreach ($name in $blocked) { $kept = @($old | Where-Object Client -eq $name); $kept | ForEach-Object { $rows.Add($_) }; Write-Host "$name`: carried over $($kept.Count) rows from the live page" }
-    } catch { $failures += "carry-over from the live page failed: $_" }
+        $c = Invoke-RestMethod -Uri "$($env:CARRY_URL)?t=$(Get-Date -UFormat %s)"   # cache-buster: gist raw URLs are cached ~5 min
+        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @() }
+        foreach ($name in $blocked) {
+            if ($c.snapshots.$name) { $carry.snapshots[$name] = $c.snapshots.$name }
+            $carry.flows += @($c.flows | Where-Object Client -eq $name); $carry.days += @($c.days | Where-Object Client -eq $name); $carry.fails += @($c.fails | Where-Object Client -eq $name)
+            Write-Host "$name`: carried over $(@($c.flows | Where-Object Client -eq $name).Count) flows from $($c.snapshots.$name)"
+        }
+        $carry | ConvertTo-Json -Depth 5 -Compress | Set-Content "$PSScriptRoot/carry.json" -Encoding UTF8
+    } catch { $failures += "carry-over failed: $_" }
 }
 
-if ($rows.Count) {
-    $rows | Export-Csv -Path "$PSScriptRoot/flow-runs.csv" -NoTypeInformation -Encoding UTF8
-    & "$PSScriptRoot/build-dashboard.ps1"
-}
+if ($rows.Count) { $rows | Export-Csv -Path "$PSScriptRoot/flow-runs.csv" -NoTypeInformation -Encoding UTF8 }
+& "$PSScriptRoot/build-dashboard.ps1"
 $failures | ForEach-Object { Write-Warning $_ }
 # Fail the job (GitHub emails the repo owner) only when nothing at all was collected: the collector itself is broken.
 if ($blocked.Count -eq @($clients).Count) { exit 1 }

@@ -56,26 +56,12 @@
 </div>
 <div id="out"></div>
 <script>
-const rows = __DATA__;
+// Pre-aggregated by build-dashboard.ps1: { snapshots: {client: collectedAt}, flows: [per flow], days: [per client per day], fails: [failed runs] }
+const data = __DATA__;
 const STALE_MS = 3600e3;   // the collector runs every 10 min; an hour without a snapshot means it is down
-
-// Latest snapshot per client. Each run of flow-runs.ps1 is one snapshot (same Collected value).
-const latest = {};
-for (const r of rows) if (!latest[r.Client] || r.Collected > latest[r.Client]) latest[r.Client] = r.Collected;
-const current = rows.filter(r => r.Collected === latest[r.Client]);
-const isRun = r => r.Status !== 'NO_RUNS' && r.Status !== 'UNREADABLE';
-
-// One summary line per client/environment/flow.
-const flows = {};
-for (const r of current) {
-  const k = [r.Client, r.Environment, r.FlowId || r.Flow].join('\u0000');   // two flows can share a display name
-  const f = flows[k] ??= { client:r.Client, env:r.Environment, flow:r.Flow, enabled:String(r.Enabled).toLowerCase() !== 'false', trigger:r.Trigger || '', runs:0, failed:0, last:'', lastStatus:'NO_RUNS' };
-  if (!isRun(r)) { f.lastStatus = r.Status; continue; }
-  f.runs++;
-  if (r.Status === 'Failed') f.failed++;
-  if (r.Start > f.last) { f.last = r.Start; f.lastStatus = r.Status; }
-}
-const summary = Object.values(flows);
+const latest = data.snapshots;
+const summary = data.flows.map(f => ({ client:f.Client, env:f.Environment, flow:f.Flow, enabled:String(f.Enabled).toLowerCase() !== 'false', trigger:f.Trigger || '', runs:+f.Runs, failed:+f.Failed, last:f.Last || '', lastStatus:f.LastStatus }));
+const sum = (arr, k) => arr.reduce((n, r) => n + (+r[k] || 0), 0);
 // Colour = what the last run says. Red: last run failed. Yellow: recovered, but failures in the window (or runs unreadable).
 // Green: no failure in the window. Disabled flows are muted, flows with 0 runs are neutral (and hidden by default).
 const cls = f => !f.enabled ? 'off' : f.lastStatus === 'Failed' ? 'bad' : (f.failed > 0 || f.lastStatus === 'UNREADABLE') ? 'warn' : f.runs > 0 ? 'ok' : '';
@@ -95,35 +81,35 @@ document.getElementById('meta').innerHTML =
 
 function health(client) {
   const fl = summary.filter(f => !client || f.client === client);
-  const cur = current.filter(r => (!client || r.Client === client) && isRun(r));
+  const dayRows = data.days.filter(d => !client || d.Client === client);
   const clients = Object.keys(latest).filter(c => !client || c === client);
   const stale = clients.some(c => Date.now() - new Date(latest[c]) > STALE_MS);
   const red = fl.filter(f => cls(f) === 'bad').length, yellow = fl.filter(f => cls(f) === 'warn').length;
   const today = localDate(new Date());
-  const todayRuns = cur.filter(r => r.Start.slice(0, 10) === today);
-  const tOk = todayRuns.filter(r => r.Status === 'Succeeded').length, tBad = todayRuns.filter(r => r.Status === 'Failed').length;
+  const todayRows = dayRows.filter(d => d.Day === today);
+  const tOk = sum(todayRows, 'Succeeded'), tBad = sum(todayRows, 'Failed');
+  const total7 = sum(dayRows, 'Runs'), failed7 = sum(dayRows, 'Failed');
   // Status follows today, like Koena's: Critical = a flow is failing right now (its latest run failed, whatever the day);
   // Degraded = failures today but recovered; Healthy = clean today. Earlier-in-the-week failures stay visible as yellow rows only.
-  const [label, tone] = stale ? ['Stale data', 'grey'] : red ? ['Critical', 'bad'] : tBad ? ['Degraded', 'warn'] : cur.length ? ['Healthy', 'ok'] : ['Waiting', 'grey'];
-  const failed7 = cur.filter(r => r.Status === 'Failed').length;
-  // Last run per client: the most recent start in that client's snapshot.
-  const lastPer = clients.map(c => cur.filter(r => r.Client === c).sort((a, b) => b.Start.localeCompare(a.Start))[0]).filter(Boolean);
+  const [label, tone] = stale ? ['Stale data', 'grey'] : red ? ['Critical', 'bad'] : tBad ? ['Degraded', 'warn'] : total7 ? ['Healthy', 'ok'] : ['Waiting', 'grey'];
+  // Last run per client: the flow with the most recent start in that client's snapshot.
+  const lastPer = clients.map(c => fl.filter(f => f.client === c && f.runs > 0).sort((a, b) => b.last.localeCompare(a.last))[0]).filter(Boolean);
   let h = `<div class="card health">
     <div class="status"><span class="dot" style="background:var(--${tone})"></span><b class="c-${tone}">${label}</b></div>
     <div class="kpi"><div class="big">${pct(tOk, tOk + tBad)}</div><small>Today's success rate (${tOk} / ${tOk + tBad} runs)</small></div>
-    <div class="stat"><div class="big">${cur.length}</div><small>Runs, last 7 days</small></div>
+    <div class="stat"><div class="big">${total7}</div><small>Runs, last 7 days</small></div>
     <div class="stat"><div class="big ${failed7 ? 'c-bad' : ''}">${failed7}</div><small>Failed, last 7 days</small></div>
     <div class="stat"><div class="big ${red ? 'c-bad' : yellow ? 'c-warn' : ''}">${red + yellow}</div><small>Flows needing attention</small></div>
-    <div class="last">${lastPer.map(r => `<div>Last run${clients.length > 1 ? ' ' + esc(r.Client) : ''}: <b>${esc(r.Flow)}</b> · <b class="${statusClass(r.Status)}">${esc(r.Status)}</b> · ${fmt(r.Start)}</div>`).join('') || '<div>No runs yet</div>'}</div>
+    <div class="last">${lastPer.map(f => `<div>Last run${clients.length > 1 ? ' ' + esc(f.client) : ''}: <b>${esc(f.flow)}</b> · <b class="${statusClass(f.lastStatus)}">${esc(f.lastStatus)}</b> · ${fmt(f.last)}</div>`).join('') || '<div>No runs yet</div>'}</div>
   </div>`;
 
   // Per-day table, last 7 days, today first.
   const days = [...Array(7)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() - i); return localDate(d); });
   h += '<div class="card wrap" style="margin-bottom:20px"><table><thead><tr><th>Date</th><th class="num">Runs</th><th class="num c-ok">Succeeded</th><th class="num c-bad">Failed</th><th class="num c-warn">Cancelled</th><th class="num">Rate</th></tr></thead><tbody>';
   for (const d of days) {
-    const rs = cur.filter(r => r.Start.slice(0, 10) === d);
-    const ok = rs.filter(r => r.Status === 'Succeeded').length, bad = rs.filter(r => r.Status === 'Failed').length, can = rs.filter(r => r.Status === 'Cancelled').length;
-    h += `<tr class="${d === today ? 'today' : ''}"><td>${d === today ? 'Today' : d}</td><td class="num">${rs.length}</td><td class="num">${ok}</td><td class="num">${bad}</td><td class="num">${can}</td><td class="num">${pct(ok, ok + bad)}</td></tr>`;
+    const rs = dayRows.filter(r => r.Day === d);
+    const ok = sum(rs, 'Succeeded'), bad = sum(rs, 'Failed'), can = sum(rs, 'Cancelled');
+    h += `<tr class="${d === today ? 'today' : ''}"><td>${d === today ? 'Today' : d}</td><td class="num">${sum(rs, 'Runs')}</td><td class="num">${ok}</td><td class="num">${bad}</td><td class="num">${can}</td><td class="num">${pct(ok, ok + bad)}</td></tr>`;
   }
   return h + '</tbody></table></div>';
 }
@@ -139,7 +125,7 @@ function render() {
   for (const f of list) h += `<tr class="${cls(f)}"><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td>${esc(f.flow)}</td><td>${esc(trig(f))}</td><td>${f.enabled ? 'Yes' : 'No'}</td><td class="num">${f.runs}</td><td class="num">${f.failed}</td><td>${fmt(f.last)}</td><td class="${statusClass(f.lastStatus)}">${esc(f.lastStatus)}</td></tr>`;
   h += '</tbody></table></div>';
 
-  const fails = current.filter(r => r.Status === 'Failed' && (!client || r.Client === client)).sort((a, b) => b.Start.localeCompare(a.Start)).slice(0, 50);
+  const fails = data.fails.filter(r => !client || r.Client === client).sort((a, b) => b.Start.localeCompare(a.Start)).slice(0, 50);
   if (fails.length) {
     h += `<h2>Failed runs <span class="muted">(last 7 days)</span></h2><div class="card wrap"><table><thead><tr><th>When</th><th>Client</th><th>Environment</th><th>Flow</th></tr></thead><tbody>`;
     for (const r of fails) h += `<tr><td>${fmt(r.Start)}</td><td>${esc(r.Client)}</td><td>${esc(r.Environment)}</td><td>${esc(r.Flow)}</td></tr>`;

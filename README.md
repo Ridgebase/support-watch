@@ -3,19 +3,23 @@
 A one-page status board for clients' Power Automate cloud flows, in the shape of the Koena health panel:
 status, today's success rate, last run per client, a 7-day table, then every flow with its last status.
 
-Live page: https://support-watch.netlify.app (rebuilt every 10 minutes by the GitHub Actions workflow).
+Live page: https://ridgebase.github.io/support-watch/ (rebuilt every 10 minutes by the GitHub Actions workflow and
+published to GitHub Pages: free and without a deploy quota, unlike Netlify's free plan at 15 credits per deploy).
 
 ## How it runs
 
 - `collect.ps1` signs in to each client tenant with a **refresh token**, reads flows and their runs for the
   configured environments through the Flow REST API, and writes `flow-runs.csv`.
-- `build-dashboard.ps1` embeds that CSV into `dashboard.template.html` and pushes the result to Netlify.
+- `build-dashboard.ps1` aggregates that CSV into `site/data.json` (per-flow and per-day totals, failed runs; ~40 KB
+  instead of every run) and renders `site/index.html` from `dashboard.template.html`.
 - `.github/workflows/watch.yml` runs both every 10 minutes. A client whose sign-in is refused keeps its rows from
   the live page (and goes STALE on the page after an hour); the job only fails when no client at all could be collected.
 
 **Known limit:** Seguin Morris (SEMO) has a Conditional Access policy that blocks sign-ins from GitHub's servers
 (AADSTS53003), while the same token works from a PC in Canada. Until their IT excludes the `integrateur-erp` account
-from that policy, SEMO data on the public page comes from the local Windows task (`flow-runs.ps1`) whenever that PC is on.
+from that policy, SEMO data on the public page comes from the local Windows task (`flow-runs.ps1`) whenever that PC
+is on: it publishes its `site/data.json` to an unlisted gist (`rry-gist.txt` holds the id) and the cloud job
+reads that gist for any client it cannot sign in to.
 
 All client-specific values live in GitHub secrets, nothing in this repo:
 
@@ -23,7 +27,7 @@ All client-specific values live in GitHub secrets, nothing in this repo:
 |-----------------|-------------------------------------------------------------------------------------------|
 | `CLIENTS_JSON`  | `[{"Name":"X","Tenant":"x.com","Environments":["Env display name", ...]}, ...]`            |
 | `RT_<NAME>`     | one per client, the refresh token written by `get-refresh-token.ps1`                       |
-| `NETLIFY_TOKEN` | a Netlify personal access token                                                            |
+| `CARRY_URL`     | raw URL of the gist where the laptop collector publishes its `data.json` (see below)              |
 
 ## Why refresh tokens
 

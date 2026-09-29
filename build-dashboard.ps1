@@ -1,25 +1,47 @@
-# Rebuilds dashboard.html from flow-runs.csv. Called by flow-runs.ps1; run alone to refresh the page.
+# Aggregates flow-runs.csv (one row per run) into site/data.json (per-flow and per-day totals, failed runs) and
+# renders site/index.html from dashboard.template.html with that JSON embedded. The page never carries raw runs:
+# ~100 KB instead of 4 MB, which matters because it reloads itself every 10 minutes and is fetched by the collector.
+# Optional carry.json (same shape as data.json) supplies clients that could not be collected this run.
+# Runs on Windows PowerShell 5.1 (laptop) and PowerShell 7 (GitHub Actions).
 param(
-    [string]$Csv = "$PSScriptRoot/flow-runs.csv",
-    [string]$Out = "$PSScriptRoot/dashboard.html"
+    [string]$Csv    = "$PSScriptRoot/flow-runs.csv",
+    [string]$OutDir = "$PSScriptRoot/site",
+    [string]$Carry  = "$PSScriptRoot/carry.json"
 )
-$json = if (Test-Path $Csv) { @(Import-Csv $Csv) | ConvertTo-Json -Compress } else { "[]" }
-if (-not $json.StartsWith('[')) { $json = "[$json]" }   # ConvertTo-Json unwraps a single row
-$html = (Get-Content "$PSScriptRoot/dashboard.template.html" -Raw -Encoding UTF8).Replace('__DATA__', $json)
-[IO.File]::WriteAllText($Out, $html, [Text.UTF8Encoding]::new($false))
-Write-Host "Dashboard written to $Out"
+$rows  = if (Test-Path $Csv) { @(Import-Csv $Csv) } else { @() }
+$isRun = { $_.Status -ne 'NO_RUNS' -and $_.Status -ne 'UNREADABLE' }
+$snapshots = @{}; $flows = @(); $days = @(); $fails = @()
 
-# Publish to Netlify (site "support-watch") when a token is present. No CLI. A failure here never breaks the local page.
-# Uses the file-digest API, not the zip API: a zip upload made Netlify tag index.html as text/plain (browser showed raw source).
-$tokenFile = "$HOME/netlify-token.txt"; $siteId = 'a065a061-4530-4c70-8c12-467c27642f2f'
-if ($env:NETLIFY_TOKEN -or (Test-Path $tokenFile)) {
-    try {
-        # NETLIFY_TOKEN env var on GitHub Actions; the DPAPI-encrypted file on the Windows PC
-        $tok = if ($env:NETLIFY_TOKEN) { $env:NETLIFY_TOKEN.Trim() } else { (New-Object PSCredential 'x', (Get-Content $tokenFile | ConvertTo-SecureString)).GetNetworkCredential().Password }
-        $h   = @{ Authorization = "Bearer $tok" }
-        $sha = (Get-FileHash $Out -Algorithm SHA1).Hash.ToLower()
-        $d   = Invoke-RestMethod -Method Post -Uri "https://api.netlify.com/api/v1/sites/$siteId/deploys" -Headers $h -ContentType 'application/json' -Body (@{ files = @{ '/index.html' = $sha } } | ConvertTo-Json)
-        if ($d.required -contains $sha) { Invoke-RestMethod -Method Put -Uri "https://api.netlify.com/api/v1/deploys/$($d.id)/files/index.html" -Headers $h -ContentType 'application/octet-stream' -InFile $Out | Out-Null }
-        Write-Host "Deployed to $($d.ssl_url) (deploy $($d.id))"
-    } catch { Write-Warning "Netlify deploy failed: $($_.Exception.Message)" }
+foreach ($g in $rows | Group-Object Client) {
+    $snapshots[$g.Name] = ($g.Group | Sort-Object Collected -Descending)[0].Collected
+    foreach ($fg in $g.Group | Group-Object Environment, FlowId, Flow) {
+        $f = $fg.Group[0]; $runs = @($fg.Group | Where-Object $isRun); $last = $runs | Sort-Object Start -Descending | Select-Object -First 1
+        $flows += [pscustomobject]@{
+            Client = $g.Name; Environment = $f.Environment; Flow = $f.Flow; FlowId = $f.FlowId; Enabled = $f.Enabled; Trigger = $f.Trigger
+            Runs = $runs.Count; Failed = @($runs | Where-Object Status -eq 'Failed').Count
+            Last = $(if ($last) { $last.Start } else { '' }); LastStatus = $(if ($last) { $last.Status } else { $f.Status })
+        }
+    }
+    foreach ($dg in $g.Group | Where-Object $isRun | Group-Object { $_.Start.Substring(0, 10) }) {
+        $days += [pscustomobject]@{
+            Client = $g.Name; Day = $dg.Name; Runs = $dg.Count
+            Succeeded = @($dg.Group | Where-Object Status -eq 'Succeeded').Count
+            Failed    = @($dg.Group | Where-Object Status -eq 'Failed').Count
+            Cancelled = @($dg.Group | Where-Object Status -eq 'Cancelled').Count
+        }
+    }
+    $fails += @($g.Group | Where-Object Status -eq 'Failed' | Sort-Object Start -Descending | Select-Object -First 100 Client, Environment, Flow, Start)
 }
+
+if (Test-Path $Carry) {
+    $c = Get-Content $Carry -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($p in $c.snapshots.PSObject.Properties) { $snapshots[$p.Name] = $p.Value }
+    $flows += @($c.flows); $days += @($c.days); $fails += @($c.fails)
+}
+
+$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails } | ConvertTo-Json -Depth 5 -Compress
+New-Item -ItemType Directory -Force $OutDir | Out-Null
+$html = (Get-Content "$PSScriptRoot/dashboard.template.html" -Raw -Encoding UTF8).Replace('__DATA__', $data)
+[IO.File]::WriteAllText("$OutDir/index.html", $html, [Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText("$OutDir/data.json", $data, [Text.UTF8Encoding]::new($false))
+Write-Host "Site written to $OutDir ($($flows.Count) flows, $($days.Count) client-days, $($fails.Count) failed runs, $([int]($html.Length / 1024)) KB)"
