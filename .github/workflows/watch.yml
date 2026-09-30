@@ -2,7 +2,7 @@ name: Support Watch
 
 on:
   schedule:
-    - cron: '*/10 * * * *'   # GitHub may delay or skip a tick under load; the page shows STALE after 1 h without a snapshot
+    - cron: '*/30 * * * *'   # fallback only: GitHub throttles schedules (observed ~30 min gaps). The 10-min cadence comes from cron-job.org calling the dispatches API.
   workflow_dispatch:
 
 # Public repo: scheduled workflows are disabled after 60 days without repo activity, so the job commits a
