@@ -47,8 +47,10 @@ jobs:
       - name: Email new failures and the daily digest
         shell: pwsh
         env:
-          MAIL_JSON:   ${{ secrets.MAIL_JSON }}
-          MAIL_SECRET: ${{ secrets.MAIL_SECRET }}
+          MAILGUN_KEY:    ${{ secrets.MAILGUN_KEY }}
+          MAILGUN_DOMAIN: ${{ secrets.MAILGUN_DOMAIN }}
+          MAILGUN_API:    ${{ secrets.MAILGUN_API }}
+          MAIL_TO:        ${{ secrets.MAIL_TO }}
         run: ./notify.ps1
 
       - name: Save alert state; keep the schedule alive (one commit a day)
