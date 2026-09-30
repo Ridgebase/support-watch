@@ -31,6 +31,24 @@ All client-specific values live in GitHub secrets, nothing in this repo:
 | `CLIENTS_JSON`  | `[{"Name":"X","Tenant":"x.com","Environments":["Env display name", ...]}, ...]`            |
 | `RT_<NAME>`     | one per client, the refresh token written by `get-refresh-token.ps1`                       |
 | `CARRY_URL`     | raw URL of the gist where the laptop collector publishes its `data.json` (see below)              |
+| `MAIL_JSON`     | `{"Tenant":"ridgebase.com","ClientId":"<app id>","From":"support@ridgebase.com","To":["support@ridgebase.com"]}` |
+| `MAIL_SECRET`   | client secret of that app registration (**expires**, max 2 years: note the date)                   |
+
+## Email alerts
+
+`notify.ps1` runs after each deploy. It emails one message per run listing the flows whose latest run has **newly**
+failed (a flow that keeps failing is announced once, until it recovers), and one digest a day after 07:00 Eastern
+with yesterday's totals and the flows failing now. No digest in the morning = the job itself is broken.
+`alerts.json` (committed by the workflow) remembers what was already announced.
+
+Mail is sent through Microsoft Graph as the shared mailbox, with an Entra app registration in the Ridgebase tenant
+holding the application permission `Mail.Send` (admin-consented) and a client secret. To keep that app from sending
+as anyone else, restrict it to the mailbox with Exchange Online PowerShell:
+
+    New-ApplicationAccessPolicy -AppId <app id> -PolicyScopeGroupId support@ridgebase.com -AccessRight RestrictAccess -Description "support-watch: send as support@ only"
+
+Test locally without sending: `.
+otify.ps1 -DryRun` prints the emails and the state it would save.
 
 ## Why refresh tokens
 

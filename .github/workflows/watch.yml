@@ -43,15 +43,23 @@ jobs:
       - id: deploy
         uses: actions/deploy-pages@v4
 
-      - name: Keep the schedule alive (one commit a day)
+      # After the deploy so a mail problem never blocks the page. A failure here turns the job red and GitHub emails the owner.
+      - name: Email new failures and the daily digest
+        shell: pwsh
+        env:
+          MAIL_JSON:   ${{ secrets.MAIL_JSON }}
+          MAIL_SECRET: ${{ secrets.MAIL_SECRET }}
+        run: ./notify.ps1
+
+      - name: Save alert state; keep the schedule alive (one commit a day)
         if: always()
         run: |
           today=$(date -u +%F)
-          if [ "$(cat last-run.txt 2>/dev/null)" != "$today" ]; then
-            echo "$today" > last-run.txt
+          [ "$(cat last-run.txt 2>/dev/null)" = "$today" ] || echo "$today" > last-run.txt
+          git add last-run.txt alerts.json
+          if ! git diff --cached --quiet; then
             git config user.name  "support-watch bot"
             git config user.email "support-watch@users.noreply.github.com"
-            git add last-run.txt
-            git commit -m "keepalive $today" -q
-            git push -q
+            git commit -m "state $today" -q
+            git pull --rebase -q && git push -q
           fi
