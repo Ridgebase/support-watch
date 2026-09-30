@@ -22,35 +22,48 @@ $tz    = try { [TimeZoneInfo]::FindSystemTimeZoneById('America/Toronto') } catch
 $now   = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz)
 $fmt   = { param($s) if ($s) { $s.Substring(0, 16).Replace('T', ' ') } else { 'never' } }
 $url   = { param($f) "https://make.powerautomate.com/environments/$($f.EnvironmentId)/flows/$($f.FlowId)/details" }
+$esc   = { param($s) [System.Net.WebUtility]::HtmlEncode("$s") }
 $mails = @()
+
+# HTML with inline styles (mail clients drop stylesheets), same palette as the page. One card per client.
+$col = @{ bg = '#f0f0f1'; fg = '#1d2327'; muted = '#666'; line = '#ccd0d4'; ok = '#2e7d32'; bad = '#c62828'; warn = '#e65100'; badbg = '#fdecea'; okbg = '#e8f5e9'; warnbg = '#fff4e5' }
+$pill = { param($text, $color, $bg) "<span style=""display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:$color;background:$bg"">$text</span>" }
+$flowRow = { param($f) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>$(& $esc $f.Flow)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $f.Environment) &middot; failed $(& $fmt $f.Last) &middot; $($f.Failed) failed of $($f.Runs) runs in 7 days</span></td>" +
+                         "<td style=""padding:10px 0 10px 12px;border-top:1px solid #e2e4e7;text-align:right;white-space:nowrap""><a href=""$(& $url $f)"" style=""display:inline-block;padding:6px 12px;border-radius:4px;background:$($col.bad);color:#fff;text-decoration:none;font-size:12px;font-weight:600"">Open flow</a></td></tr>" }
+$card = { param($title, $body) "<div style=""background:#fff;border:1px solid $($col.line);border-radius:6px;padding:14px 16px;margin:0 0 12px""><div style=""font-size:15px;font-weight:600;margin-bottom:6px"">$title</div>$body</div>" }
+$wrap = { param($kicker, $title, $inner)
+    "<!doctype html><html><body style=""margin:0;padding:24px 16px;background:$($col.bg);color:$($col.fg);font:14px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif"">" +
+    "<div style=""max-width:600px;margin:0 auto""><div style=""color:$($col.muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em"">Support Watch</div>" +
+    "<h1 style=""font-size:20px;margin:2px 0 16px"">$title</h1>$inner" +
+    "<div style=""color:$($col.muted);font-size:12px;margin-top:16px"">$kicker &middot; <a href=""$page"" style=""color:$($col.muted)"">Open the dashboard</a></div></div></body></html>" }
 
 # --- real-time: new failures since the last run ---------------------------------------------------------------
 $failing = @($d.flows | Where-Object { $_.LastStatus -eq 'Failed' -and "$($_.Enabled)".ToLower() -ne 'false' })
 $new     = @($failing | Where-Object { -not $open.ContainsKey("$($_.Client)|$($_.FlowId)") })
 $open    = @{}; foreach ($f in $failing) { $open["$($f.Client)|$($f.FlowId)"] = $f.Last }   # recovered/removed flows drop out silently
 if ($new) {
-    $body = foreach ($g in $new | Group-Object Client) {
-        "$($g.Name): $($g.Count) flow(s) whose latest run failed`n"
-        foreach ($f in $g.Group) { "- $($f.Flow) ($($f.Environment))`n  failed $(& $fmt $f.Last); $($f.Failed) failed of $($f.Runs) runs in 7 days`n  $(& $url $f)`n" }
+    $cards = foreach ($g in $new | Group-Object Client) {
+        & $card "$($g.Name) $(& $pill "$($g.Count) failing" $col.bad $col.badbg)" "<table style=""width:100%;border-collapse:collapse"">$(($g.Group | ForEach-Object { & $flowRow $_ }) -join '')</table>"
     }
     $mails += @{ subject = "[Support Watch] $(($new | Group-Object Client | ForEach-Object { "$($_.Name): $($_.Count) failing" }) -join ', ')"
-                 body    = ($body -join "`n") + "`nOpen the flow, then its last run, to read the error.`nDashboard: $page" }
+                 body    = & $wrap 'Open the flow, then its last run, to read the error' "$($new.Count) flow$(if ($new.Count -gt 1) { 's' }) whose latest run failed" ($cards -join '') }
 }
 
 # --- daily digest after 07:00 Eastern ------------------------------------------------------------------------
 $today = $now.ToString('yyyy-MM-dd'); $yday = $now.AddDays(-1).ToString('yyyy-MM-dd')
 if ($now.Hour -ge 7 -and $digest -ne $today) {
-    $lines = foreach ($c in ($d.snapshots.PSObject.Properties.Name | Sort-Object)) {
+    $clients = @($d.snapshots.PSObject.Properties.Name | Sort-Object)
+    $cards = foreach ($c in $clients) {
         $day  = $d.days | Where-Object { $_.Client -eq $c -and $_.Day -eq $yday }
         $red  = @($failing | Where-Object Client -eq $c)
         $age  = [datetime]::UtcNow - [TimeZoneInfo]::ConvertTimeToUtc([datetime]$d.snapshots.$c, $tz)
-        "${c}" + $(if ($age.TotalHours -gt 1) { "  STALE: last snapshot $(& $fmt $d.snapshots.$c)" })
-        "  yesterday: $(if ($day) { "$($day.Runs) runs, $($day.Failed) failed, $($day.Cancelled) cancelled" } else { 'no runs' })"
-        "  failing now: $(if ($red) { ($red | ForEach-Object { $_.Flow }) -join ', ' } else { 'none' })"
-        ''
+        $pills = $(if ($red) { & $pill "$($red.Count) failing" $col.bad $col.badbg } else { & $pill 'Healthy' $col.ok $col.okbg }) + $(if ($age.TotalHours -gt 1) { ' ' + (& $pill "STALE since $(& $fmt $d.snapshots.$c)" $col.warn $col.warnbg) })
+        $yest  = if ($day) { "<b>$($day.Runs)</b> runs &middot; <b style=""color:$(if ($day.Failed) { $col.bad } else { $col.ok })"">$($day.Failed)</b> failed &middot; $($day.Cancelled) cancelled" } else { 'no runs' }
+        $rows  = if ($red) { "<table style=""width:100%;border-collapse:collapse;margin-top:8px"">$(($red | ForEach-Object { & $flowRow $_ }) -join '')</table>" } else { '' }
+        & $card "$c $pills" "<div style=""color:$($col.muted);font-size:12px"">Yesterday</div><div>$yest</div>$rows"
     }
-    $short = ($d.snapshots.PSObject.Properties.Name | Sort-Object | ForEach-Object { $n = @($failing | Where-Object Client -eq $_).Count; "$_ $(if ($n) { "$n failing" } else { 'healthy' })" }) -join ', '
-    $mails += @{ subject = "[Support Watch] Digest ${today}: $short"; body = ($lines -join "`n") + "Dashboard: $page" }
+    $short = ($clients | ForEach-Object { $n = @($failing | Where-Object Client -eq $_).Count; "$_ $(if ($n) { "$n failing" } else { 'healthy' })" }) -join ', '
+    $mails += @{ subject = "[Support Watch] Digest ${today}: $short"; body = & $wrap "Digest for $yday, sent every morning; no digest means the job is down" $short ($cards -join '') }
     $digest = $today
 }
 
@@ -62,7 +75,7 @@ if ($mails) {
     $cred = [pscredential]::new($env:SMTP_USER, (ConvertTo-SecureString $env:SMTP_PASSWORD -AsPlainText -Force))
     foreach ($mail in $mails) {
         # Send-MailMessage is marked obsolete but still ships in PowerShell 7 and does STARTTLS on 587; enough for a few mails a day.
-        Send-MailMessage -SmtpServer $smtpHost -Port 587 -UseSsl -Credential $cred -From "Support Watch <$($env:SMTP_USER)>" -To ($env:MAIL_TO -split ',\s*') -Subject $mail.subject -Body $mail.body -Encoding UTF8 -WarningAction SilentlyContinue
+        Send-MailMessage -SmtpServer $smtpHost -Port 587 -UseSsl -Credential $cred -From "Support Watch <$($env:SMTP_USER)>" -To ($env:MAIL_TO -split ',\s*') -Subject $mail.subject -Body $mail.body -BodyAsHtml -Encoding UTF8 -WarningAction SilentlyContinue
         Write-Host "Sent: $($mail.subject)"
     }
 }
