@@ -12,7 +12,10 @@ published to GitHub Pages: free and without a deploy quota, unlike Netlify's fre
   configured environments through the Flow REST API, and writes `flow-runs.csv`.
 - `build-dashboard.ps1` aggregates that CSV into `site/data.json` (per-flow and per-day totals, failed runs; ~40 KB
   instead of every run) and renders `site/index.html` from `dashboard.template.html`.
-- `.github/workflows/watch.yml` runs both every 10 minutes. A client whose sign-in is refused keeps its rows from
+- `.github/workflows/watch.yml` runs both every 10 minutes. GitHub throttles its own `schedule` trigger (gaps of ~30 min
+  were observed), so the 10-minute cadence comes from a free cron-job.org job that POSTs to the workflow's
+  `dispatches` API with a fine-grained token (repo `support-watch`, permission Actions read/write, approved by an
+  org owner, **expires after one year**); GitHub's cron stays as a 30-minute fallback. A client whose sign-in is refused keeps its rows from
   the live page (and goes STALE on the page after an hour); the job only fails when no client at all could be collected.
 
 **Known limit:** Seguin Morris (SEMO) has a Conditional Access policy that blocks sign-ins from GitHub's servers
