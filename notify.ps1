@@ -22,7 +22,7 @@ $open  = @{}; foreach ($p in @($st.open.PSObject.Properties)) { $open[$p.Name] =
 $digest = "$($st.digest)"
 $tz    = try { [TimeZoneInfo]::FindSystemTimeZoneById('America/Toronto') } catch { [TimeZoneInfo]::FindSystemTimeZoneById('Eastern Standard Time') }   # IANA id on Linux, Windows id on 5.1
 $now   = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz)
-$fmt   = { param($s) if ($s) { $s.Substring(0, 16).Replace('T', ' ') } else { 'never' } }
+$fmt   = { param($s) if ($s -is [datetime]) { $s.ToString('yyyy-MM-dd HH:mm') } elseif ($s) { "$s".Substring(0, 16).Replace('T', ' ') } else { 'never' } }   # pwsh 7 parses ISO strings in JSON into [datetime], 5.1 keeps strings
 $url   = { param($f) "https://make.powerautomate.com/environments/$($f.EnvironmentId)/flows/$($f.FlowId)/details" }
 $esc   = { param($s) [System.Net.WebUtility]::HtmlEncode("$s") }
 $mails = @()
@@ -43,7 +43,7 @@ $wrap = { param($kicker, $title, $inner)
 # --- real-time: new failures since the last run ---------------------------------------------------------------
 $failing = @($d.flows | Where-Object { $_.LastStatus -eq 'Failed' -and "$($_.Enabled)".ToLower() -ne 'false' })
 $new     = @($failing | Where-Object { -not $open.ContainsKey("$($_.Client)|$($_.FlowId)") })
-$open    = @{}; foreach ($f in $failing) { $open["$($f.Client)|$($f.FlowId)"] = $f.Last }   # recovered/removed flows drop out silently
+$open    = @{}; foreach ($f in $failing) { $open["$($f.Client)|$($f.FlowId)"] = & $fmt $f.Last }   # recovered/removed flows drop out silently
 if ($new) {
     $cards = foreach ($g in $new | Group-Object Client) {
         & $card "$($g.Name) $(& $pill "$($g.Count) failing" $col.bad $col.badbg)" "<table style=""width:100%;border-collapse:collapse"">$(($g.Group | ForEach-Object { & $flowRow $_ }) -join '')</table>"
