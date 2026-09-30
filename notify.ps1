@@ -3,12 +3,12 @@
 # the dead-man's switch: no digest in the morning means the job itself is broken.
 # State lives in alerts.json (committed by the workflow): { open: { "Client|FlowId": "<last failed run>" }, digest: "YYYY-MM-DD" }.
 # Runs on Windows PowerShell 5.1 and PowerShell 7.
-# Mail goes out through Mailgun (Ridgebase's mail is Google Workspace, so Graph cannot send as support@; the SPF record
-# already authorises Mailgun for ridgebase.com). Secrets:
-#   MAILGUN_KEY     a sending API key for the domain
-#   MAILGUN_DOMAIN  the domain verified in Mailgun, e.g. ridgebase.com or mg.ridgebase.com
-#   MAIL_TO         recipient(s), comma-separated
-#   MAILGUN_API     optional, https://api.eu.mailgun.net for an EU account (default: https://api.mailgun.net)
+# Mail goes out over SMTP (Ridgebase's mail is Google Workspace, so Microsoft Graph has no support@ mailbox to send as,
+# and nobody on the team has access to the Mailgun account the SPF record authorises). Secrets:
+#   SMTP_USER      the sending account, also the From address, e.g. a Workspace user with an app password
+#   SMTP_PASSWORD  its app password (Google: 2-Step Verification must be on, myaccount.google.com/apppasswords)
+#   MAIL_TO        recipient(s), comma-separated
+#   SMTP_HOST      optional, default smtp.gmail.com (Mailgun would be smtp.mailgun.org); port 587 with STARTTLS
 # -DryRun prints the emails instead of sending and leaves alerts.json untouched.
 param([string]$Data = "$PSScriptRoot/site/data.json", [string]$State = "$PSScriptRoot/alerts.json", [switch]$DryRun)
 $ErrorActionPreference = 'Stop'
@@ -57,11 +57,12 @@ if ($now.Hour -ge 7 -and $digest -ne $today) {
 # --- send + save ---------------------------------------------------------------------------------------------
 if ($DryRun) { $mails | ForEach-Object { "=== $($_.subject)`n$($_.body)`n" }; "state: $(@{ open = $open; digest = $digest } | ConvertTo-Json -Compress)"; return }
 if ($mails) {
-    if (-not ($env:MAILGUN_KEY -and $env:MAILGUN_DOMAIN -and $env:MAIL_TO)) { Write-Warning "MAILGUN_KEY/MAILGUN_DOMAIN/MAIL_TO not set: $($mails.Count) email(s) not sent."; return }   # state not saved: alert again once mail works
-    $api  = if ($env:MAILGUN_API) { $env:MAILGUN_API } else { 'https://api.mailgun.net' }
-    $auth = 'Basic ' + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("api:$($env:MAILGUN_KEY)"))
+    if (-not ($env:SMTP_USER -and $env:SMTP_PASSWORD -and $env:MAIL_TO)) { Write-Warning "SMTP_USER/SMTP_PASSWORD/MAIL_TO not set: $($mails.Count) email(s) not sent."; return }   # state not saved: alert again once mail works
+    $smtpHost = if ($env:SMTP_HOST) { $env:SMTP_HOST } else { 'smtp.gmail.com' }
+    $cred = [pscredential]::new($env:SMTP_USER, (ConvertTo-SecureString $env:SMTP_PASSWORD -AsPlainText -Force))
     foreach ($mail in $mails) {
-        Invoke-RestMethod -Method Post -Uri "$api/v3/$($env:MAILGUN_DOMAIN)/messages" -Headers @{ Authorization = $auth } -Body @{ from = "Support Watch <support-watch@$($env:MAILGUN_DOMAIN)>"; to = $env:MAIL_TO; subject = $mail.subject; text = $mail.body } | Out-Null
+        # Send-MailMessage is marked obsolete but still ships in PowerShell 7 and does STARTTLS on 587; enough for a few mails a day.
+        Send-MailMessage -SmtpServer $smtpHost -Port 587 -UseSsl -Credential $cred -From "Support Watch <$($env:SMTP_USER)>" -To ($env:MAIL_TO -split ',\s*') -Subject $mail.subject -Body $mail.body -Encoding UTF8 -WarningAction SilentlyContinue
         Write-Host "Sent: $($mail.subject)"
     }
 }
