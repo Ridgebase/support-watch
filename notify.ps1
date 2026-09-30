@@ -10,7 +10,9 @@
 #   MAIL_TO        recipient(s), comma-separated
 #   SMTP_HOST      optional, default smtp.gmail.com (Mailgun would be smtp.mailgun.org); port 587 with STARTTLS
 # -DryRun prints the emails instead of sending and leaves alerts.json untouched.
-param([string]$Data = "$PSScriptRoot/site/data.json", [string]$State = "$PSScriptRoot/alerts.json", [switch]$DryRun)
+# -Sample marks one real flow per client as failed and sends only that alert, prefixed [Sample], without saving state:
+#   gh workflow run watch.yml --repo Ridgebase/support-watch -f sample=true
+param([string]$Data = "$PSScriptRoot/site/data.json", [string]$State = "$PSScriptRoot/alerts.json", [switch]$DryRun, [switch]$Sample)
 $ErrorActionPreference = 'Stop'
 $page = 'https://ridgebase.github.io/support-watch/'
 
@@ -24,6 +26,7 @@ $fmt   = { param($s) if ($s) { $s.Substring(0, 16).Replace('T', ' ') } else { 'n
 $url   = { param($f) "https://make.powerautomate.com/environments/$($f.EnvironmentId)/flows/$($f.FlowId)/details" }
 $esc   = { param($s) [System.Net.WebUtility]::HtmlEncode("$s") }
 $mails = @()
+if ($Sample) { $open = @{}; foreach ($g in $d.flows | Where-Object { $_.Runs -gt 0 } | Group-Object Client) { $g.Group[0].LastStatus = 'Failed'; $g.Group[0].Failed = 1 } }
 
 # HTML with inline styles (mail clients drop stylesheets), same palette as the page. One card per client.
 $col = @{ bg = '#f0f0f1'; fg = '#1d2327'; muted = '#666'; line = '#ccd0d4'; ok = '#2e7d32'; bad = '#c62828'; warn = '#e65100'; badbg = '#fdecea'; okbg = '#e8f5e9'; warnbg = '#fff4e5' }
@@ -45,13 +48,13 @@ if ($new) {
     $cards = foreach ($g in $new | Group-Object Client) {
         & $card "$($g.Name) $(& $pill "$($g.Count) failing" $col.bad $col.badbg)" "<table style=""width:100%;border-collapse:collapse"">$(($g.Group | ForEach-Object { & $flowRow $_ }) -join '')</table>"
     }
-    $mails += @{ subject = "[Support Watch] $(($new | Group-Object Client | ForEach-Object { "$($_.Name): $($_.Count) failing" }) -join ', ')"
+    $mails += @{ subject = "$(if ($Sample) { '[Sample] ' })[Support Watch] $(($new | Group-Object Client | ForEach-Object { "$($_.Name): $($_.Count) failing" }) -join ', ')"
                  body    = & $wrap 'Open the flow, then its last run, to read the error' "$($new.Count) flow$(if ($new.Count -gt 1) { 's' }) whose latest run failed" ($cards -join '') }
 }
 
 # --- daily digest after 07:00 Eastern ------------------------------------------------------------------------
 $today = $now.ToString('yyyy-MM-dd'); $yday = $now.AddDays(-1).ToString('yyyy-MM-dd')
-if ($now.Hour -ge 7 -and $digest -ne $today) {
+if ($now.Hour -ge 7 -and $digest -ne $today -and -not $Sample) {
     $clients = @($d.snapshots.PSObject.Properties.Name | Sort-Object)
     $cards = foreach ($c in $clients) {
         $day  = $d.days | Where-Object { $_.Client -eq $c -and $_.Day -eq $yday }
@@ -79,4 +82,5 @@ if ($mails) {
         Write-Host "Sent: $($mail.subject)"
     }
 }
+if ($Sample) { return }
 @{ open = $open; digest = $digest } | ConvertTo-Json -Compress | Set-Content $State -Encoding UTF8

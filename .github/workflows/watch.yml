@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '*/30 * * * *'   # fallback only: GitHub throttles schedules (observed ~30 min gaps). The 10-min cadence comes from cron-job.org calling the dispatches API.
   workflow_dispatch:
+    inputs:
+      sample:
+        description: Send a sample failure alert (one real flow per client marked failed; nothing saved)
+        type: boolean
+        default: false
 
 # Public repo: scheduled workflows are disabled after 60 days without repo activity, so the job commits a
 # one-line marker once a day (last step). Secrets never touch the repo. The page is published to GitHub Pages:
@@ -53,7 +58,7 @@ jobs:
           SMTP_USER:     ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           MAIL_TO:       ${{ secrets.MAIL_TO }}
-        run: git pull -q --ff-only; ./notify.ps1
+        run: git pull -q --ff-only; ./notify.ps1 -Sample:('${{ inputs.sample }}' -eq 'true')
 
       - name: Save alert state; keep the schedule alive (one commit a day)
         if: always()
