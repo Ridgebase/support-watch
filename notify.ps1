@@ -40,7 +40,7 @@ $flowRow = { param($f) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e
 $card = { param($title, $body) "<div style=""background:#fff;border:1px solid $($col.line);border-radius:6px;padding:14px 16px;margin:0 0 12px""><div style=""font-size:15px;font-weight:600;margin-bottom:6px"">$title</div>$body</div>" }
 $wrap = { param($kicker, $title, $inner)
     "<!doctype html><html><body style=""margin:0;padding:24px 16px;background:$($col.bg);color:$($col.fg);font:14px/1.5 'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif"">" +
-    "<div style=""max-width:600px;margin:0 auto""><div style=""color:$($col.bad);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em"">Ridgebase &middot; Support Watch</div>" +
+    "<div style=""max-width:600px;margin:0 auto""><div style=""color:$($col.bad);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em"">Ridgebase &middot; Syst&egrave;me de surveillance support</div>" +
     "<h1 style=""font:400 26px/1.15 'Palatino Linotype',Palatino,Georgia,serif;letter-spacing:-.01em;margin:2px 0 16px"">$title</h1>$inner" +
     "<div style=""color:$($col.muted);font-size:12px;margin-top:16px"">$kicker &middot; <a href=""$page"" style=""color:$($col.muted)"">Open the dashboard</a></div></div></body></html>" }
 
