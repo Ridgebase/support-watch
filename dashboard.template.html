@@ -25,7 +25,9 @@
   .kpi { flex:1; min-width:180px; }
   .kpi .big { font-size:24px; font-weight:600; }
   .stat { text-align:center; border-left:1px solid var(--line2); padding-left:24px; }
-  .stat .big { font-size:20px; font-weight:600; }
+  .stat .big { font-size:20px; font-weight:600; display:block; color:inherit; text-decoration:none; }
+  .stat a.big:hover { text-decoration:underline; }
+  h2 { scroll-margin-top:12px; }
   .stat small, .kpi small { color:var(--muted); font-size:12px; display:block; }
   .last { border-left:1px solid var(--line2); padding-left:24px; font-size:13px; color:var(--muted); line-height:1.8; text-align:left; }
   .last b { color:var(--fg); }
@@ -101,9 +103,9 @@ function health(client) {
     <div class="status"><span class="dot" style="background:var(--${tone})"></span><b class="c-${tone}">${label}</b></div>
     <div class="kpi"><div class="big">${pct(tOk, tOk + tBad)}</div><small>Today's success rate (${tOk} / ${tOk + tBad} runs)</small></div>
     <div class="stat"><div class="big">${total7}</div><small>Runs, last 7 days</small></div>
-    <div class="stat"><div class="big ${failed7 ? 'c-bad' : ''}">${failed7}</div><small>Failed, last 7 days</small></div>
-    <div class="stat"><div class="big ${red ? 'c-bad' : yellow ? 'c-warn' : ''}">${red + yellow}</div><small>Flows needing attention</small></div>
-    <div class="stat"><div class="big ${unreadable ? 'c-grey' : ''}">${unreadable}</div><small>Unreachable flows</small></div>
+    <div class="stat"><a href="#failed" class="big ${failed7 ? 'c-bad' : ''}">${failed7}</a><small>Failed, last 7 days</small></div>
+    <div class="stat"><a href="#flows" data-problems class="big ${red ? 'c-bad' : yellow ? 'c-warn' : ''}">${red + yellow}</a><small>Flows needing attention</small></div>
+    <div class="stat"><a href="#unreachable" class="big ${unreadable ? 'c-grey' : ''}">${unreadable}</a><small>Unreachable flows</small></div>
     <div class="last">${lastPer.map(f => `<div>Last run${clients.length > 1 ? ' ' + esc(f.client) : ''}: <b>${esc(f.flow)}</b> · <b class="${statusClass(f.lastStatus)}">${esc(f.lastStatus)}</b> · ${fmt(f.last)}</div>`).join('') || '<div>No runs yet</div>'}</div>
   </div>`;
 
@@ -125,13 +127,13 @@ function render() {
   const rank = { bad: 0, warn: 1, ok: 2, '': 3, off: 4 };
   const list = summary.filter(f => (!client || f.client === client) && (!only || problem(f)) && (!hideQuiet || f.runs > 0))
     .sort((a, b) => rank[cls(a)] - rank[cls(b)] || b.failed - a.failed || a.client.localeCompare(b.client) || a.flow.localeCompare(b.flow));
-  h += `<h2>Flows <span class="muted">(${list.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Flow</th><th>Trigger</th><th>Enabled</th><th class="num">Runs</th><th class="num">Failed</th><th>Last run</th><th>Last status</th></tr></thead><tbody>`;
+  h += `<h2 id="flows">Flows <span class="muted">(${list.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Flow</th><th>Trigger</th><th>Enabled</th><th class="num">Runs</th><th class="num">Failed</th><th>Last run</th><th>Last status</th></tr></thead><tbody>`;
   for (const f of list) h += `<tr class="${cls(f)}"><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td>${esc(f.flow)}${f.url ? ` <button class="copy" data-url="${esc(f.url)}" title="Copy the flow's Power Automate URL">⧉</button>` : ''}</td><td>${esc(trig(f))}</td><td>${f.enabled ? 'Yes' : 'No'}</td><td class="num">${f.runs}</td><td class="num">${f.failed}</td><td>${fmt(f.last)}</td><td class="${statusClass(f.lastStatus)}">${esc(f.lastStatus)}</td></tr>`;
   h += '</tbody></table></div>';
 
   const fails = data.fails.filter(r => !client || r.Client === client).sort((a, b) => b.Start.localeCompare(a.Start)).slice(0, 50);
   if (fails.length) {
-    h += `<h2>Failed runs <span class="muted">(last 7 days)</span></h2><div class="card wrap"><table><thead><tr><th>When</th><th>Client</th><th>Environment</th><th>Flow</th></tr></thead><tbody>`;
+    h += `<h2 id="failed">Failed runs <span class="muted">(last 7 days)</span></h2><div class="card wrap"><table><thead><tr><th>When</th><th>Client</th><th>Environment</th><th>Flow</th></tr></thead><tbody>`;
     for (const r of fails) h += `<tr><td>${fmt(r.Start)}</td><td>${esc(r.Client)}</td><td>${esc(r.Environment)}</td><td>${esc(r.Flow)}</td></tr>`;
     h += '</tbody></table></div>';
   }
@@ -139,7 +141,7 @@ function render() {
   // runs are simply unknown for this build. Listed here because 0 runs hides them from the main table by default.
   const unread = summary.filter(f => (!client || f.client === client) && f.lastStatus === 'UNREADABLE').sort((a, b) => a.client.localeCompare(b.client) || a.flow.localeCompare(b.flow));
   if (unread.length) {
-    h += `<h2>Unreachable flows <span class="muted">(${unread.length})</span></h2><p class="muted">The Power Automate API timed out while reading these flows' run history, so their runs are unknown for this snapshot. They are not failing; the next collection usually clears this.</p><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Flow</th><th>Snapshot</th></tr></thead><tbody>`;
+    h += `<h2 id="unreachable">Unreachable flows <span class="muted">(${unread.length})</span></h2><p class="muted">The Power Automate API timed out while reading these flows' run history, so their runs are unknown for this snapshot. They are not failing; the next collection usually clears this.</p><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Flow</th><th>Snapshot</th></tr></thead><tbody>`;
     for (const f of unread) h += `<tr><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td>${esc(f.flow)}${f.url ? ` <button class="copy" data-url="${esc(f.url)}" title="Copy the flow's Power Automate URL">⧉</button>` : ''}</td><td>${fmt(latest[f.client])}</td></tr>`;
     h += '</tbody></table></div>';
   }
@@ -147,6 +149,8 @@ function render() {
 }
 // Copy button: writes the flow's URL to the clipboard and shows a check mark for a moment.
 document.getElementById('out').addEventListener('click', e => {
+  // The "needing attention" number jumps to the flows table with "problems only" ticked, so the table shows just those rows.
+  const a = e.target.closest('a[data-problems]'); if (a) { document.getElementById('problems').checked = true; render(); return; }
   const b = e.target.closest('button.copy'); if (!b) return;
   navigator.clipboard.writeText(b.dataset.url).then(() => { b.textContent = '✓'; setTimeout(() => b.textContent = '⧉', 1200); });
 });
