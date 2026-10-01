@@ -23,7 +23,7 @@ GitHub's US runners are refused (AADSTS53003). SEMO is therefore collected by `a
 function in **Canada Central** (Ridgebase subscription, resource group `rg-support-watch`, app `func-support-watch-semo`),
 every 10 minutes: it fetches `collect.ps1`, `build-dashboard.ps1` and the template from this repo's `main` at each run
 (no redeploy for script changes), collects SEMO, and publishes `site/data.json` to an unlisted gist; the cloud job
-reads that gist for any client it cannot sign in to. Its settings: `CLIENTS_JSON` (SEMO only, with `FlowDays` and
+reads that gist for any client it cannot sign in to. Its settings: `CLIENTS_JSON_B64` (CLIENTS_JSON base64-encoded, SEMO only, with `FlowDays` and
 `PowerBI`), `RT_SEMO`, `GIST_ID`, `GIST_TOKEN`; `azure-function/set-secrets.ps1` copies the secret ones from the PC that
 holds them. Deploy with `func azure functionapp publish func-support-watch-semo --powershell` from `azure-function/`
 (zip deploy through `az` returned Bad Request on this Linux consumption app; the runtime is `PowerShell|7.4`, the

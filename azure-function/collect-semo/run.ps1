@@ -2,9 +2,11 @@
 # Conditional Access allows while GitHub's US runners are refused, and publishes data.json to the gist the cloud job
 # reads. It is the laptop collector (flow-runs.ps1) without the laptop.
 # The scripts are fetched from the public repo's main branch at each run, so a change there needs no redeploy here.
-# App settings: CLIENTS_JSON, RT_SEMO (as collect.ps1 expects), GIST_ID, GIST_TOKEN (a GitHub token with the gist scope).
+# App settings: CLIENTS_JSON_B64 (CLIENTS_JSON base64-encoded: az CLI parses a JSON-looking setting value and stores it
+# without its quotes), RT_SEMO (as collect.ps1 expects), GIST_ID, GIST_TOKEN (a GitHub token with the gist scope).
 param($Timer)
 $ErrorActionPreference = 'Stop'
+$env:CLIENTS_JSON = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:CLIENTS_JSON_B64))
 
 $work = Join-Path ([IO.Path]::GetTempPath()) 'support-watch'   # wwwroot is read-only on the consumption plan
 New-Item -ItemType Directory -Force $work | Out-Null
