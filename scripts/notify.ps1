@@ -17,7 +17,7 @@
 #   gh workflow run watch.yml --repo Ridgebase/support-watch -f digest=true
 param([string]$Data = "$PSScriptRoot/../out/site/data.json", [string]$State = "$PSScriptRoot/../state/alerts.json", [switch]$DryRun, [switch]$Sample, [switch]$SampleDigest)
 $ErrorActionPreference = 'Stop'
-$page = 'https://ridgebase.github.io/support-watch/'
+$page = 'https://gentle-beach-054c0680f.4.azurestaticapps.net/'
 
 $d     = Get-Content $Data -Raw -Encoding UTF8 | ConvertFrom-Json
 $st    = if (Test-Path $State) { Get-Content $State -Raw -Encoding UTF8 | ConvertFrom-Json } else { $null }

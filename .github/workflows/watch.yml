@@ -15,12 +15,10 @@ on:
         default: false
 
 # Public repo: scheduled workflows are disabled after 60 days without repo activity, so the job commits a
-# one-line marker once a day (last step). Secrets never touch the repo. The page is published to GitHub Pages:
-# free, no deploy quota (Netlify's free plan charges 15 credits per deploy, i.e. 20 deploys a month).
+# one-line marker once a day (last step). Secrets never touch the repo. The page is published to Azure Static
+# Web Apps (free tier, sign-in required); GitHub Pages had no access control and Netlify's free plan a deploy quota.
 permissions:
   contents: write
-  pages: write
-  id-token: write
 
 concurrency:
   group: support-watch
@@ -30,9 +28,6 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,12 +40,15 @@ jobs:
           CARRY_URL:    ${{ secrets.CARRY_URL }}
         run: ./scripts/collect.ps1
 
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: out/site
-
+      # Azure Static Web Apps (free tier): the site requires a Microsoft sign-in and the invited "reader" role (scripts/staticwebapp.config.json).
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          app_location: out/site
+          skip_app_build: true
+          skip_api_build: true
 
       # After the deploy so a mail problem never blocks the page. A failure here turns the job red and GitHub emails the owner.
       # A run is pinned to the commit it was triggered on, so a run that waited behind another would read stale alerts.json,

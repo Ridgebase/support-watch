@@ -3,8 +3,12 @@
 A one-page status board for clients' Power Automate cloud flows, in the shape of the Koena health panel:
 status, today's success rate, last run per client, a 7-day table, then every flow with its last status.
 
-Live page: https://ridgebase.github.io/support-watch/ (rebuilt every 10 minutes by the GitHub Actions workflow and
-published to GitHub Pages: free and without a deploy quota, unlike Netlify's free plan at 15 credits per deploy).
+Live page: https://gentle-beach-054c0680f.4.azurestaticapps.net/ (rebuilt every 10 minutes by the GitHub Actions workflow and
+published to **Azure Static Web Apps**, free tier, `swa-support-watch` in `rg-support-watch`). It requires a Microsoft
+sign-in and the `reader` role, which only invited addresses hold: `az staticwebapp users invite --subscription "Microsoft
+Azure Sponsorship #1" -n swa-support-watch --authentication-provider AAD --user-details <email> --role reader --domain
+gentle-beach-054c0680f.4.azurestaticapps.net --invitation-expiration-in-hours 168` prints a one-time invitation link to send
+to the colleague (free tier: up to 25 users). The deploy token lives in the `AZURE_STATIC_WEB_APPS_API_TOKEN` secret.
 
 ## Layout
 
