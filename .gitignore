@@ -4,8 +4,5 @@ powerbi.csv
 site/
 carry.json
 run.log
-# local-only Windows collector: holds client names, owner addresses and environment names
+# local-only Windows collector (fallback to the Azure Function): holds tenant, environment and Power BI workspace names
 flow-runs.ps1
-
-# old single-file output, superseded by site/
-dashboard.html
