@@ -29,6 +29,7 @@
   .stat a.big:hover { text-decoration:underline; }
   h2 { scroll-margin-top:12px; }
   .stat small, .kpi small { color:var(--muted); font-size:12px; display:block; }
+  .stat.c-bad small, .stat.c-warn small, .stat.c-grey small { color:inherit; }   /* a coloured tile colours its label too */
   .last { border-left:1px solid var(--line2); padding-left:24px; font-size:13px; color:var(--muted); line-height:1.8; text-align:left; }
   .last b { color:var(--fg); }
   .c-ok { color:var(--ok); } .c-warn { color:var(--warn); } .c-bad { color:var(--bad); } .c-grey { color:var(--grey); }
@@ -103,9 +104,9 @@ function health(client) {
     <div class="status"><span class="dot" style="background:var(--${tone})"></span><b class="c-${tone}">${label}</b></div>
     <div class="kpi"><div class="big">${pct(tOk, tOk + tBad)}</div><small>Today's success rate (${tOk} / ${tOk + tBad} runs)</small></div>
     <div class="stat"><div class="big">${total7}</div><small>Runs, last 7 days</small></div>
-    <div class="stat"><a href="#failed" class="big ${failed7 ? 'c-bad' : ''}">${failed7}</a><small>Failed, last 7 days</small></div>
-    <div class="stat"><a href="#flows" class="big ${red ? 'c-bad' : yellow ? 'c-warn' : ''}">${red + yellow}</a><small>Flows needing attention</small></div>
-    <div class="stat"><a href="#unreachable" class="big ${unreadable ? 'c-grey' : ''}">${unreadable}</a><small>Unreachable flows</small></div>
+    <div class="stat ${failed7 ? 'c-bad' : ''}"><a href="#failed" class="big">${failed7}</a><small>Failed, last 7 days</small></div>
+    <div class="stat ${red ? 'c-bad' : yellow ? 'c-warn' : ''}"><a href="#flows" class="big">${red + yellow}</a><small>Flows needing attention</small></div>
+    <div class="stat ${unreadable ? 'c-grey' : ''}"><a href="#unreachable" class="big">${unreadable}</a><small>Unreachable flows</small></div>
     <div class="last">${lastPer.map(f => `<div>Last run${clients.length > 1 ? ' ' + esc(f.client) : ''}: <b>${esc(f.flow)}</b> · <b class="${statusClass(f.lastStatus)}">${esc(f.lastStatus)}</b> · ${fmt(f.last)}</div>`).join('') || '<div>No runs yet</div>'}</div>
   </div>`;
 
