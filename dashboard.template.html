@@ -137,7 +137,9 @@ function render() {
   const fails = data.fails.filter(r => !client || r.Client === client).sort((a, b) => b.Start.localeCompare(a.Start)).slice(0, 50);
   if (fails.length) {
     h += `<h2 id="failed">Failed runs <span class="muted">(last 7 days)</span></h2><div class="card wrap"><table><thead><tr><th>When</th><th>Client</th><th>Environment</th><th>Flow</th></tr></thead><tbody>`;
-    for (const r of fails) h += `<tr><td>${fmt(r.Start)}</td><td>${esc(r.Client)}</td><td>${esc(r.Environment)}</td><td>${esc(r.Flow)}</td></tr>`;
+    // Failed-run rows carry no flow id: take the URL from the matching flow in the summary.
+    const urlOf = r => (summary.find(f => f.client === r.Client && f.env === r.Environment && f.flow === r.Flow) || {}).url;
+    for (const r of fails) h += `<tr><td>${fmt(r.Start)}</td><td>${esc(r.Client)}</td><td>${esc(r.Environment)}</td><td>${esc(r.Flow)}${copyBtn(urlOf(r))}</td></tr>`;
     h += '</tbody></table></div>';
   }
   // Flows whose run history the collector could not read (Flow API 503/504 on every retry). Not a flow problem: the
