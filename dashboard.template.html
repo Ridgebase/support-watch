@@ -87,7 +87,7 @@ function health(client) {
   const dayRows = data.days.filter(d => !client || d.Client === client);
   const clients = Object.keys(latest).filter(c => !client || c === client);
   const stale = clients.some(c => Date.now() - new Date(latest[c]) > STALE_MS);
-  const red = fl.filter(f => cls(f) === 'bad').length, yellow = fl.filter(f => cls(f) === 'warn').length;
+  const red = fl.filter(f => cls(f) === 'bad').length, yellow = fl.filter(f => cls(f) === 'warn').length, unreadable = fl.filter(f => f.lastStatus === 'UNREADABLE').length;
   const today = localDate(new Date());
   const todayRows = dayRows.filter(d => d.Day === today);
   const tOk = sum(todayRows, 'Succeeded'), tBad = sum(todayRows, 'Failed');
@@ -103,6 +103,7 @@ function health(client) {
     <div class="stat"><div class="big">${total7}</div><small>Runs, last 7 days</small></div>
     <div class="stat"><div class="big ${failed7 ? 'c-bad' : ''}">${failed7}</div><small>Failed, last 7 days</small></div>
     <div class="stat"><div class="big ${red ? 'c-bad' : yellow ? 'c-warn' : ''}">${red + yellow}</div><small>Flows needing attention</small></div>
+    <div class="stat"><div class="big ${unreadable ? 'c-grey' : ''}">${unreadable}</div><small>Unreachable flows</small></div>
     <div class="last">${lastPer.map(f => `<div>Last run${clients.length > 1 ? ' ' + esc(f.client) : ''}: <b>${esc(f.flow)}</b> · <b class="${statusClass(f.lastStatus)}">${esc(f.lastStatus)}</b> · ${fmt(f.last)}</div>`).join('') || '<div>No runs yet</div>'}</div>
   </div>`;
 
