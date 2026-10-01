@@ -1,4 +1,4 @@
-# Aggregates flow-runs.csv (one row per run) into site/data.json (per-flow and per-day totals, failed runs) and
+﻿# Aggregates flow-runs.csv (one row per run) into site/data.json (per-flow and per-day totals, failed runs) and
 # renders site/index.html from dashboard.template.html with that JSON embedded. The page never carries raw runs:
 # ~100 KB instead of 4 MB, which matters because it reloads itself every 10 minutes and is fetched by the collector.
 # Optional carry.json (same shape as data.json) supplies clients that could not be collected this run.
@@ -20,6 +20,7 @@ foreach ($g in $rows | Group-Object Client) {
             Client = $g.Name; Environment = $f.Environment; EnvironmentId = $f.EnvironmentId; Flow = $f.Flow; FlowId = $f.FlowId; Enabled = $f.Enabled; Trigger = $f.Trigger
             Runs = $runs.Count; Failed = @($runs | Where-Object Status -eq 'Failed').Count
             Last = $(if ($last) { $last.Start } else { '' }); LastStatus = $(if ($last) { $last.Status } else { $f.Status })
+            LastFailed = "$($runs | Where-Object Status -eq 'Failed' | Sort-Object Start -Descending | Select-Object -First 1 -ExpandProperty Start)"   # '' when none ($null would serialize as {} in 5.1); notify.ps1 alerts on a failed run newer than the one it last announced
         }
     }
     foreach ($dg in $g.Group | Where-Object $isRun | Group-Object { $_.Start.Substring(0, 10) }) {

@@ -1,7 +1,8 @@
-﻿# Emails support@ about flows whose LATEST run failed, Koena-style: one email per run with only the NEW failures
-# (a flow keeps failing = one email until it recovers), plus one weekly recap on Monday after 07:00 Eastern that doubles as
-# the dead-man's switch: no recap on Monday morning means the job itself is broken.
-# State lives in alerts.json (committed by the workflow): { open: { "Client|FlowId": "<last failed run>" }, digest: "YYYY-MM-DD" }.
+﻿# Emails support@ about flows with a NEW failed run: one email per job run listing the flows whose most recent failed run
+# is newer than the one last announced (so a run that fails and recovers inside the 10-minute window is still reported, and
+# a flow that keeps failing every few minutes is reported once per job run at most), plus one weekly recap on Monday after
+# 07:00 Eastern that doubles as the dead-man's switch: no recap on Monday morning means the job itself is broken.
+# State lives in alerts.json (committed by the workflow): { open: { "Client|FlowId": "<start of the last announced failed run>" }, digest: "YYYY-MM-DD" }.
 # Runs on Windows PowerShell 5.1 and PowerShell 7.
 # Mail goes out over SMTP (Ridgebase's mail is Google Workspace, so Microsoft Graph has no support@ mailbox to send as,
 # and nobody on the team has access to the Mailgun account the SPF record authorises). Secrets:
@@ -28,13 +29,13 @@ $fmt   = { param($s) if ($s -is [datetime]) { $s.ToString('yyyy-MM-dd HH:mm') } 
 $url   = { param($f) "https://make.powerautomate.com/environments/$($f.EnvironmentId)/flows/$($f.FlowId)/details" }
 $esc   = { param($s) [System.Net.WebUtility]::HtmlEncode("$s") }
 $mails = @()
-if ($Sample) { $open = @{}; foreach ($g in $d.flows | Where-Object { $_.Runs -gt 0 } | Group-Object Client) { $g.Group[0].LastStatus = 'Failed'; $g.Group[0].Failed = 1 } }
+if ($Sample) { $open = @{}; foreach ($f in $d.flows) { $f.LastFailed = '' }; foreach ($g in $d.flows | Where-Object { $_.Runs -gt 0 } | Group-Object Client) { $g.Group[0].LastStatus = 'Failed'; $g.Group[0].Failed = 1; $g.Group[0].LastFailed = $g.Group[0].Last } }   # only the marked flow per client, not the week's real failures
 
 # HTML with inline styles (mail clients drop stylesheets), same palette as the page. One card per client.
 $col = @{ bg = '#f8f7f5'; fg = '#262e3a'; muted = '#76706a'; line = '#e4ded7'; ok = '#3c8274'; bad = '#e95664'; warn = '#c2641a'; badbg = '#fdecee'; okbg = '#e9f3ee'; warnbg = '#fdf1e6' }
 $pill = { param($text, $color, $bg) "<span style=""display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:$color;background:$bg"">$text</span>" }
 # Mail clients run no script, so there is no click-to-copy: the flow URL is also printed as plain text to select and copy (a triple-click selects the line).
-$flowRow = { param($f) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>$(& $esc $f.Flow)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $f.Environment) &middot; last run $(& $fmt $f.Last) &middot; $($f.Failed) failed of $($f.Runs) runs in 7 days</span>" +
+$flowRow = { param($f) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>$(& $esc $f.Flow)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $f.Environment) &middot; failed $(& $fmt $f.LastFailed) &middot; last run $(& $fmt $f.Last) $(& $esc $f.LastStatus) &middot; $($f.Failed) failed of $($f.Runs) runs in 7 days</span>" +
                          "<div style=""margin-top:6px;font:11px/1.4 Consolas,Menlo,monospace;color:$($col.muted);word-break:break-all"">$(& $url $f)</div></td>" +
                          "<td style=""padding:10px 0 10px 12px;border-top:1px solid #e2e4e7;text-align:right;white-space:nowrap""><a href=""$(& $url $f)"" style=""display:inline-block;padding:6px 12px;border-radius:4px;background:$($col.bad);color:#fff;text-decoration:none;font-size:12px;font-weight:600"">Open flow</a></td></tr>" }
 $card = { param($title, $body) "<div style=""background:#fff;border:1px solid $($col.line);border-radius:6px;padding:14px 16px;margin:0 0 12px""><div style=""font:400 19px/1.2 'Palatino Linotype',Palatino,Georgia,serif;color:#043f45;margin-bottom:8px"">$title</div>$body</div>" }
@@ -44,16 +45,19 @@ $wrap = { param($kicker, $title, $inner)
     "<h1 style=""font:400 26px/1.15 'Palatino Linotype',Palatino,Georgia,serif;letter-spacing:-.01em;margin:2px 0 16px"">$title</h1>$inner" +
     "<div style=""color:$($col.muted);font-size:12px;margin-top:16px"">$kicker &middot; <a href=""$page"" style=""color:$($col.muted)"">Open the dashboard</a></div></div></body></html>" }
 
-# --- real-time: new failures since the last run ---------------------------------------------------------------
-$failing = @($d.flows | Where-Object { $_.LastStatus -eq 'Failed' -and "$($_.Enabled)".ToLower() -ne 'false' })
-$new     = @($failing | Where-Object { -not $open.ContainsKey("$($_.Client)|$($_.FlowId)") })
-$open    = @{}; foreach ($f in $failing) { $open["$($f.Client)|$($f.FlowId)"] = & $fmt $f.Last }   # recovered/removed flows drop out silently
+# --- real-time: failed runs not announced yet ------------------------------------------------------------------
+$failing = @($d.flows | Where-Object { $_.LastStatus -eq 'Failed' -and "$($_.Enabled)".ToLower() -ne 'false' })   # failing right now (recap pills)
+$failed  = @($d.flows | Where-Object { $_.LastFailed -and "$($_.Enabled)".ToLower() -ne 'false' })                 # any failure in the window
+$key     = { param($f) "$($f.Client)|$($f.FlowId)" }
+$iso     = { param($s) if ($s -is [datetime]) { $s.ToString('s') } else { "$s" } }   # pwsh 7 parses JSON dates into [datetime]; compare as ISO strings on both engines
+$new     = @($failed | Where-Object { $k = & $key $_; -not $open.ContainsKey($k) -or (& $iso $_.LastFailed) -gt (& $iso $open[$k]) })
+$open    = @{}; foreach ($f in $failed) { $open[(& $key $f)] = & $iso $f.LastFailed }   # flows whose failures left the 7-day window drop out silently
 if ($new -and -not $SampleDigest) {
     $cards = foreach ($g in $new | Group-Object Client) {
-        & $card "$($g.Name) $(& $pill "$($g.Count) failing" $col.bad $col.badbg)" "<table style=""width:100%;border-collapse:collapse"">$(($g.Group | ForEach-Object { & $flowRow $_ }) -join '')</table>"
+        & $card "$($g.Name) $(& $pill "$($g.Count) failed" $col.bad $col.badbg)" "<table style=""width:100%;border-collapse:collapse"">$(($g.Group | ForEach-Object { & $flowRow $_ }) -join '')</table>"
     }
-    $mails += @{ subject = "$(if ($Sample) { '[Sample] ' })[Support Watch] $(($new | Group-Object Client | ForEach-Object { "$($_.Name): $($_.Count) failing" }) -join ', ')"
-                 body    = & $wrap 'Open the flow, then its last run, to read the error' "$($new.Count) flow$(if ($new.Count -gt 1) { 's' }) whose latest run failed" ($cards -join '') }
+    $mails += @{ subject = "$(if ($Sample) { '[Sample] ' })[Support Watch] $(($new | Group-Object Client | ForEach-Object { "$($_.Name): $($_.Count) failed" }) -join ', ')"
+                 body    = & $wrap 'Open the flow, then the failed run, to read the error' "$($new.Count) flow$(if ($new.Count -gt 1) { 's' }) with a new failed run" ($cards -join '') }
 }
 
 # --- weekly recap, Monday after 07:00 Eastern ----------------------------------------------------------------
