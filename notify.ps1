@@ -29,7 +29,7 @@ $fmt   = { param($s) if ($s -is [datetime]) { $s.ToString('yyyy-MM-dd HH:mm') } 
 $url   = { param($f) "https://make.powerautomate.com/environments/$($f.EnvironmentId)/flows/$($f.FlowId)/details" }
 $esc   = { param($s) [System.Net.WebUtility]::HtmlEncode("$s") }
 $mails = @()
-if ($Sample) { $open = @{}; foreach ($f in $d.flows) { $f.LastFailed = '' }; foreach ($g in $d.flows | Where-Object { $_.Runs -gt 0 } | Group-Object Client) { $g.Group[0].LastStatus = 'Failed'; $g.Group[0].Failed = 1; $g.Group[0].LastFailed = $g.Group[0].Last } }   # only the marked flow per client, not the week's real failures
+if ($Sample) { $open = @{}; foreach ($f in $d.flows) { $f | Add-Member LastFailed '' -Force }; foreach ($g in $d.flows | Where-Object { $_.Runs -gt 0 } | Group-Object Client) { $g.Group[0].LastStatus = 'Failed'; $g.Group[0].Failed = 1; $g.Group[0].LastFailed = $g.Group[0].Last } }   # only the marked flow per client, not the week's real failures
 
 # HTML with inline styles (mail clients drop stylesheets), same palette as the page. One card per client.
 $col = @{ bg = '#f8f7f5'; fg = '#262e3a'; muted = '#76706a'; line = '#e4ded7'; ok = '#3c8274'; bad = '#e95664'; warn = '#c2641a'; badbg = '#fdecee'; okbg = '#e9f3ee'; warnbg = '#fdf1e6' }
