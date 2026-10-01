@@ -134,6 +134,14 @@ function render() {
     for (const r of fails) h += `<tr><td>${fmt(r.Start)}</td><td>${esc(r.Client)}</td><td>${esc(r.Environment)}</td><td>${esc(r.Flow)}</td></tr>`;
     h += '</tbody></table></div>';
   }
+  // Flows whose run history the collector could not read (Flow API 503/504 on every retry). Not a flow problem: the
+  // runs are simply unknown for this build. Listed here because 0 runs hides them from the main table by default.
+  const unread = summary.filter(f => (!client || f.client === client) && f.lastStatus === 'UNREADABLE').sort((a, b) => a.client.localeCompare(b.client) || a.flow.localeCompare(b.flow));
+  if (unread.length) {
+    h += `<h2>Unreachable flows <span class="muted">(${unread.length})</span></h2><p class="muted">The Power Automate API timed out while reading these flows' run history, so their runs are unknown for this snapshot. They are not failing; the next collection usually clears this.</p><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Flow</th><th>Snapshot</th></tr></thead><tbody>`;
+    for (const f of unread) h += `<tr><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td>${esc(f.flow)}${f.url ? ` <button class="copy" data-url="${esc(f.url)}" title="Copy the flow's Power Automate URL">⧉</button>` : ''}</td><td>${fmt(latest[f.client])}</td></tr>`;
+    h += '</tbody></table></div>';
+  }
   document.getElementById('out').innerHTML = h;
 }
 // Copy button: writes the flow's URL to the clipboard and shows a check mark for a moment.
