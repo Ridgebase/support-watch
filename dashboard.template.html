@@ -26,6 +26,8 @@
   .card { background:var(--card); border:1px solid var(--line); border-radius:8px; }
   .controls { margin:14px 0 18px; display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
   .controls label { display:inline-flex; align-items:center; gap:8px; cursor:pointer; }
+  .controls label[data-for] { display:none; }   /* the second switch depends on the tab */
+  body[data-tab="pa"] .controls label[data-for="pa"], body[data-tab="bi"] .controls label[data-for="bi"] { display:inline-flex; }
   select { appearance:none; -webkit-appearance:none; font:inherit; color:var(--fg); background:var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' fill='none' stroke='%2376706a' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 10px center / 12px; border:1px solid var(--line); border-radius:6px; padding:6px 30px 6px 10px; min-width:160px; cursor:pointer; }
   select:hover { border-color:var(--muted); }
   select:focus { outline:2px solid var(--accent); outline-offset:1px; }
@@ -83,7 +85,8 @@
 <div class="controls">
   <label>Client <select id="client"><option value="">All clients</option></select></label>
   <label><span class="switch"><input type="checkbox" id="problems"><span></span></span>Problems only</label>
-  <label><span class="switch"><input type="checkbox" id="hidequiet" checked><span></span></span>Hide flows with 0 runs</label>
+  <label data-for="pa"><span class="switch"><input type="checkbox" id="hidequiet" checked><span></span></span>Hide flows with 0 runs</label>
+  <label data-for="bi"><span class="switch"><input type="checkbox" id="hidedisabled" checked><span></span></span>Hide disabled and stale models</label>
 </div>
 <div class="tabs" role="tablist"><button class="active" data-tab="pa" role="tab">Power Automate</button><button data-tab="bi" role="tab">Power BI</button></div>
 <div id="out"></div>
@@ -151,7 +154,8 @@ function health(client) {
 }
 
 function render() {
-  const only = document.getElementById('problems').checked, hideQuiet = document.getElementById('hidequiet').checked, client = sel.value;
+  const only = document.getElementById('problems').checked, hideQuiet = document.getElementById('hidequiet').checked, hideDisabled = document.getElementById('hidedisabled').checked, client = sel.value;
+  document.body.dataset.tab = tab;
   let h = '';
 
   // Power BI: last refresh per semantic model. Unknown = refresh in progress; Disabled = schedule switched off.
@@ -159,7 +163,7 @@ function render() {
   const pbiCls = r => !r.Start || Date.now() - new Date(r.Start) > 7 * 864e5 ? 'off' : r.Status === 'Completed' ? 'ok' : r.Status === 'Failed' ? 'bad' : r.Status === 'Unknown' ? '' : 'warn';
   const pbiLabel = r => r.Status === 'Unknown' ? 'Running' : r.Status === 'Completed' ? 'Succeeded' : r.Status;
   const dur = r => r.Start && r.End ? Math.max(1, Math.round((new Date(r.End) - new Date(r.Start)) / 60e3)) + ' min' : '—';
-  const pbi = (data.powerbi || []).filter(r => (!client || r.Client === client) && (!only || ['bad', 'warn'].includes(pbiCls(r))))
+  const pbi = (data.powerbi || []).filter(r => (!client || r.Client === client) && (!only || ['bad', 'warn'].includes(pbiCls(r))) && (!hideDisabled || (pbiCls(r) !== 'off' && r.Status !== 'Disabled')))
     .sort((a, b) => a.Client.localeCompare(b.Client) || a.Workspace.localeCompare(b.Workspace) || a.Model.localeCompare(b.Model));
   // Power BI tab: a red badge on the tab counts the models whose recent refresh failed, whatever filter is on.
   const biBad = (data.powerbi || []).filter(r => (!client || r.Client === client) && pbiCls(r) === 'bad').length;
@@ -215,6 +219,7 @@ document.querySelector('.tabs').addEventListener('click', e => {
 });
 if (tab === 'bi') document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('active', x.dataset.tab === 'bi'));
 document.getElementById('problems').onchange = render;
+document.getElementById('hidedisabled').onchange = render;
 document.getElementById('hidequiet').onchange = render;
 sel.onchange = render;
 render();
