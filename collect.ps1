@@ -4,6 +4,8 @@
 #
 # Config comes from environment variables (GitHub secrets), never from the repo:
 #   CLIENTS_JSON   [{"Name":"SEMO","Tenant":"seguinmorris.com","Environments":["..."]}, ...]
+#                  optional per client: "FlowDays": {"<flow display name>": 1} shortens the window for a flow whose
+#                  thousands of runs a week would otherwise take minutes to page through (its 7-day totals then cover only those days)
 #   RT_<NAME>      the client's refresh token (from get-refresh-token.ps1), e.g. RT_SEMO
 #   NETLIFY_TOKEN  used by build-dashboard.ps1
 param([int]$Days = 7, [int]$Parallel = 8)
@@ -60,6 +62,7 @@ foreach ($c in $clients) {
         # The Flow API returns 503/504 timeouts now and then; without retries the flow lost all its runs for that build and showed UNREADABLE.
         $flowRows = $flows | ForEach-Object -ThrottleLimit $Parallel -Parallel {
             $flow = $_; $api = $using:api; $ver = $using:ver; $h = $using:h; $since = $using:since; $tz = $using:tz; $envId = ($using:env)['name']
+            $fd = ($using:c).FlowDays; $fdName = $flow['properties']['displayName']; if ($fd -and $fd.$fdName) { $since = ($using:nowUtc).AddDays(-$fd.$fdName) }
             $utc = { param($s) [datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
             $url = "$api/environments/$envId/flows/$($flow['name'])/runs?$ver"; $runs = @(); $status = $null
             try {
