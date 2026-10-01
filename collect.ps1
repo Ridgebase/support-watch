@@ -100,6 +100,9 @@ if ($blocked -and $env:CARRY_URL) {
     } catch { $failures += "carry-over failed: $_" }
 }
 
+# Stamp the snapshot when the collection ends: on the laptop it takes minutes, and a run that started meanwhile
+# would otherwise show a start later than its own snapshot on the page.
+$collected = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s'); foreach ($r in $rows) { $r.Collected = $collected }
 if ($rows.Count) { $rows | Export-Csv -Path "$PSScriptRoot/flow-runs.csv" -NoTypeInformation -Encoding UTF8 }
 & "$PSScriptRoot/build-dashboard.ps1"
 $failures | ForEach-Object { Write-Warning $_ }
