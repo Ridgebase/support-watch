@@ -45,7 +45,7 @@
   tr.warn { background:var(--warnbg); }
   tr.ok   { background:var(--okbg); }
   tr.off  { color:var(--muted); }
-  button.copy { float:right; border:0; background:none; color:var(--muted); padding:0; margin:1px 0 0 8px; cursor:pointer; font-size:12px; line-height:18px; height:18px; display:inline-flex; align-items:center; }
+  button.copy { border:0; background:none; color:var(--muted); padding:0; margin-left:6px; cursor:pointer; font-size:12px; line-height:18px; height:18px; display:inline-flex; align-items:center; vertical-align:middle; }
   button.copy:hover { color:var(--fg); }
   @media (max-width: 700px) { .stat, .last { border-left:0; padding-left:0; text-align:left; } }
 </style>
@@ -131,7 +131,7 @@ function render() {
   const list = summary.filter(f => (!client || f.client === client) && (!only || problem(f)) && (!hideQuiet || f.runs > 0))
     .sort((a, b) => rank[cls(a)] - rank[cls(b)] || b.failed - a.failed || a.client.localeCompare(b.client) || a.flow.localeCompare(b.flow));
   h += `<h2 id="flows">Flows <span class="muted">(${list.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Flow</th><th>Trigger</th><th>Enabled</th><th class="num">Runs</th><th class="num">Failed</th><th>Last run</th><th>Last status</th></tr></thead><tbody>`;
-  for (const f of list) h += `<tr class="${cls(f)}"><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td>${copyBtn(f.url)}${esc(f.flow)}</td><td>${esc(trig(f))}</td><td>${f.enabled ? 'Yes' : 'No'}</td><td class="num">${f.runs}</td><td class="num">${f.failed}</td><td>${fmt(f.last)}</td><td class="${statusClass(f.lastStatus)}">${esc(f.lastStatus)}</td></tr>`;
+  for (const f of list) h += `<tr class="${cls(f)}"><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td>${esc(f.flow)}${copyBtn(f.url)}</td><td>${esc(trig(f))}</td><td>${f.enabled ? 'Yes' : 'No'}</td><td class="num">${f.runs}</td><td class="num">${f.failed}</td><td>${fmt(f.last)}</td><td class="${statusClass(f.lastStatus)}">${esc(f.lastStatus)}</td></tr>`;
   h += '</tbody></table></div>';
 
   const fails = data.fails.filter(r => !client || r.Client === client).sort((a, b) => b.Start.localeCompare(a.Start)).slice(0, 50);
@@ -145,7 +145,7 @@ function render() {
   const unread = summary.filter(f => (!client || f.client === client) && f.lastStatus === 'UNREADABLE').sort((a, b) => a.client.localeCompare(b.client) || a.flow.localeCompare(b.flow));
   if (unread.length) {
     h += `<h2 id="unreachable">Unreachable flows <span class="muted">(${unread.length})</span></h2><p class="muted">The Power Automate API timed out while reading these flows' run history, so their runs are unknown for this snapshot. They are not failing; the next collection usually clears this.</p><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Flow</th><th>Snapshot</th></tr></thead><tbody>`;
-    for (const f of unread) h += `<tr><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td>${copyBtn(f.url)}${esc(f.flow)}</td><td>${fmt(latest[f.client])}</td></tr>`;
+    for (const f of unread) h += `<tr><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td>${esc(f.flow)}${copyBtn(f.url)}</td><td>${fmt(latest[f.client])}</td></tr>`;
     h += '</tbody></table></div>';
   }
   document.getElementById('out').innerHTML = h;
