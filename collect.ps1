@@ -30,7 +30,7 @@ $blocked   = @()   # clients whose sign-in failed this run
 function Get-All($url, $headers, [scriptblock]$stopWhen) {
     $out = @()
     while ($url) {
-        $r = (Invoke-WebRequest -Uri $url -Headers $headers).Content | ConvertFrom-Json -AsHashtable
+        $r = (Invoke-WebRequest -Uri $url -Headers $headers -MaximumRetryCount 3 -RetryIntervalSec 5).Content | ConvertFrom-Json -AsHashtable
         $out += $r['value']; $url = $r['nextLink']
         if ($stopWhen -and $out.Count -and (& $stopWhen $out[-1])) { break }
     }
@@ -57,13 +57,14 @@ foreach ($c in $clients) {
     foreach ($env in $envs) {
         $flows = @(Get-All "$api/environments/$($env['name'])/flows?$ver" $h)
         # One runs request per flow, in parallel. Runs come newest first: stop paging once a page ends before the window.
+        # The Flow API returns 503/504 timeouts now and then; without retries the flow lost all its runs for that build and showed UNREADABLE.
         $flowRows = $flows | ForEach-Object -ThrottleLimit $Parallel -Parallel {
             $flow = $_; $api = $using:api; $ver = $using:ver; $h = $using:h; $since = $using:since; $tz = $using:tz; $envId = ($using:env)['name']
             $utc = { param($s) [datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
             $url = "$api/environments/$envId/flows/$($flow['name'])/runs?$ver"; $runs = @(); $status = $null
             try {
                 while ($url) {
-                    $r = (Invoke-WebRequest -Uri $url -Headers $h).Content | ConvertFrom-Json -AsHashtable
+                    $r = (Invoke-WebRequest -Uri $url -Headers $h -MaximumRetryCount 3 -RetryIntervalSec 5).Content | ConvertFrom-Json -AsHashtable
                     $runs += $r['value']; $url = $r['nextLink']
                     if ($runs.Count -and (& $utc $runs[-1]['properties']['startTime']) -lt $since) { break }
                 }

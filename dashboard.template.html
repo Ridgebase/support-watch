@@ -65,9 +65,9 @@ const latest = data.snapshots;
 const summary = data.flows.map(f => ({ client:f.Client, env:f.Environment, flow:f.Flow, enabled:String(f.Enabled).toLowerCase() !== 'false', trigger:f.Trigger || '', runs:+f.Runs, failed:+f.Failed, last:f.Last || '', lastStatus:f.LastStatus,
   url: f.EnvironmentId && f.FlowId ? `https://make.powerautomate.com/environments/${f.EnvironmentId}/flows/${f.FlowId}/details` : '' }));
 const sum = (arr, k) => arr.reduce((n, r) => n + (+r[k] || 0), 0);
-// Colour = what the last run says. Red: last run failed. Yellow: recovered, but failures in the window (or runs unreadable).
+// Colour = what the last run says. Red: last run failed. Yellow: recovered, but failures in the window. UNREADABLE (API timeout) is neutral: a collector hiccup, not a flow problem.
 // Green: no failure in the window. Disabled flows are muted, flows with 0 runs are neutral (and hidden by default).
-const cls = f => !f.enabled ? 'off' : f.lastStatus === 'Failed' ? 'bad' : (f.failed > 0 || f.lastStatus === 'UNREADABLE') ? 'warn' : f.runs > 0 ? 'ok' : '';
+const cls = f => !f.enabled ? 'off' : f.lastStatus === 'Failed' ? 'bad' : f.failed > 0 ? 'warn' : f.runs > 0 ? 'ok' : '';
 const problem = f => ['bad', 'warn'].includes(cls(f));
 const trig = f => ({ 'Recurrence/': 'Schedule', 'OpenApiConnectionWebhook/': 'Event', 'OpenApiConnection/': 'Polling', 'Request/Button': 'Button', 'Request/PowerApp': 'Power Apps', 'Request/Manual': 'Manual', 'Request/Http': 'HTTP', 'Request/ApiConnection': 'HTTP' })[f.trigger] || (f.trigger ? f.trigger.split('/')[0] : '');
 const fmt = iso => iso ? iso.replace('T', ' ').slice(0, 16) : '—';
