@@ -31,9 +31,10 @@ if ($Sample) { $open = @{}; foreach ($g in $d.flows | Where-Object { $_.Runs -gt
 # HTML with inline styles (mail clients drop stylesheets), same palette as the page. One card per client.
 $col = @{ bg = '#f0f0f1'; fg = '#1d2327'; muted = '#666'; line = '#ccd0d4'; ok = '#2e7d32'; bad = '#c62828'; warn = '#e65100'; badbg = '#fdecea'; okbg = '#e8f5e9'; warnbg = '#fff4e5' }
 $pill = { param($text, $color, $bg) "<span style=""display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:$color;background:$bg"">$text</span>" }
-# Mail clients run no script, so there is no click-to-copy: the flow URL is printed as plain text to select and copy (a triple-click selects the line).
+# Mail clients run no script, so there is no click-to-copy: the flow URL is also printed as plain text to select and copy (a triple-click selects the line).
 $flowRow = { param($f) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>$(& $esc $f.Flow)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $f.Environment) &middot; failed $(& $fmt $f.Last) &middot; $($f.Failed) failed of $($f.Runs) runs in 7 days</span>" +
-                         "<div style=""margin-top:6px;font:11px/1.4 Consolas,Menlo,monospace;color:$($col.muted);word-break:break-all"">$(& $url $f)</div></td></tr>" }
+                         "<div style=""margin-top:6px;font:11px/1.4 Consolas,Menlo,monospace;color:$($col.muted);word-break:break-all"">$(& $url $f)</div></td>" +
+                         "<td style=""padding:10px 0 10px 12px;border-top:1px solid #e2e4e7;text-align:right;white-space:nowrap""><a href=""$(& $url $f)"" style=""display:inline-block;padding:6px 12px;border-radius:4px;background:$($col.bad);color:#fff;text-decoration:none;font-size:12px;font-weight:600"">Open flow</a></td></tr>" }
 $card = { param($title, $body) "<div style=""background:#fff;border:1px solid $($col.line);border-radius:6px;padding:14px 16px;margin:0 0 12px""><div style=""font-size:15px;font-weight:600;margin-bottom:6px"">$title</div>$body</div>" }
 $wrap = { param($kicker, $title, $inner)
     "<!doctype html><html><body style=""margin:0;padding:24px 16px;background:$($col.bg);color:$($col.fg);font:14px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif"">" +
