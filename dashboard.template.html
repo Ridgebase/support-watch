@@ -5,17 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- auto-reload is done in JS with a cache-buster (see bottom): GitHub Pages caches the page for 10 min, and a plain meta refresh would re-serve the cached copy -->
 <title>Support Watch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root { --bg:#f0f0f1; --card:#fff; --fg:#1d2327; --muted:#666; --line:#ccd0d4; --line2:#e2e4e7; --head:#f0f0f1;
-          --ok:#2e7d32; --warn:#e65100; --bad:#c62828; --grey:#666;
-          --okbg:#e8f5e9; --warnbg:#fff4e5; --badbg:#fdecea; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#111; --card:#1b1b1b; --fg:#eee; --muted:#999; --line:#333; --line2:#2a2a2a; --head:#222;
-          --ok:#81c784; --warn:#ffb74d; --bad:#ef9a9a; --grey:#999; --okbg:#14301a; --warnbg:#3a2a10; --badbg:#3a1a18; } }
-  body { margin:0; padding:16px; font:13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); }
-  h1 { font-size:20px; margin:0 0 4px; }
-  h2 { font-size:15px; margin:24px 0 8px; }
+  /* ridgebase.com palette: warm off-white, navy text, coral accent; status colours are the site's success/warning/error tokens
+     (darkened a step where they are used as text). Headings use the site's own fallback for its licensed serif. */
+  :root { --bg:#f8f7f5; --card:#fff; --fg:#262e3a; --muted:#76706a; --line:#e4ded7; --line2:#f1efeb; --head:#f1efeb; --accent:#e95664;
+          --ok:#3c8274; --warn:#c2641a; --bad:#e95664; --grey:#76706a;
+          --okbg:#e9f3ee; --warnbg:#fdf1e6; --badbg:#fdecee; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1a212a; --card:#262e3a; --fg:#e4ded7; --muted:#cdc1b8; --line:#3a4452; --line2:#2f3845; --head:#222a35; --accent:#ed7883;
+          --ok:#57a773; --warn:#f6af31; --bad:#ed7883; --grey:#cdc1b8; --okbg:#21352c; --warnbg:#3a2e18; --badbg:#3d2529; } }
+  body { margin:0; padding:16px; font:14px/1.4 "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); }
+  h1, h2 { font-family:"Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif; font-weight:400; letter-spacing:-.01em; }
+  .eyebrow { color:var(--accent); font-size:11px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; margin:4px 0 2px; }
+  h1 { font-size:30px; line-height:1.1; margin:0 0 6px; }
+  h2 { font-size:21px; margin:28px 0 10px; }
   .muted { color:var(--muted); }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:6px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; }
   .controls { margin:12px 0; }
   .controls label { margin-right:16px; }
   .health { display:flex; align-items:center; gap:24px; padding:16px; margin-bottom:20px; flex-wrap:wrap; }
@@ -26,7 +32,7 @@
   .kpi .big { font-size:24px; font-weight:600; }
   .stat { text-align:center; border-left:1px solid var(--line2); padding-left:24px; }
   .stat .big { font-size:20px; font-weight:600; display:block; color:inherit; text-decoration:none; }
-  .stat a.big:hover { text-decoration:underline; }
+  .stat a.big:hover { text-decoration:underline; color:var(--accent); }
   h2 { scroll-margin-top:12px; }
   .stat small, .kpi small { color:var(--muted); font-size:12px; display:block; }
   .last { border-left:1px solid var(--line2); padding-left:24px; font-size:13px; color:var(--muted); line-height:1.8; text-align:left; }
@@ -46,11 +52,12 @@
   tr.ok   { background:var(--okbg); }
   tr.off  { color:var(--muted); }
   button.copy { border:0; background:none; color:var(--muted); padding:0; margin-left:6px; cursor:pointer; font-size:12px; line-height:18px; height:18px; display:inline-flex; align-items:center; vertical-align:middle; }
-  button.copy:hover { color:var(--fg); }
+  button.copy:hover { color:var(--accent); }
   @media (max-width: 700px) { .stat, .last { border-left:0; padding-left:0; text-align:left; } }
 </style>
 </head>
 <body>
+<div class="eyebrow">Ridgebase</div>
 <h1>Support Watch</h1>
 <p class="muted" id="meta"></p>
 <div class="controls">

@@ -31,7 +31,7 @@ $mails = @()
 if ($Sample) { $open = @{}; foreach ($g in $d.flows | Where-Object { $_.Runs -gt 0 } | Group-Object Client) { $g.Group[0].LastStatus = 'Failed'; $g.Group[0].Failed = 1 } }
 
 # HTML with inline styles (mail clients drop stylesheets), same palette as the page. One card per client.
-$col = @{ bg = '#f0f0f1'; fg = '#1d2327'; muted = '#666'; line = '#ccd0d4'; ok = '#2e7d32'; bad = '#c62828'; warn = '#e65100'; badbg = '#fdecea'; okbg = '#e8f5e9'; warnbg = '#fff4e5' }
+$col = @{ bg = '#f8f7f5'; fg = '#262e3a'; muted = '#76706a'; line = '#e4ded7'; ok = '#3c8274'; bad = '#e95664'; warn = '#c2641a'; badbg = '#fdecee'; okbg = '#e9f3ee'; warnbg = '#fdf1e6' }
 $pill = { param($text, $color, $bg) "<span style=""display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:600;color:$color;background:$bg"">$text</span>" }
 # Mail clients run no script, so there is no click-to-copy: the flow URL is also printed as plain text to select and copy (a triple-click selects the line).
 $flowRow = { param($f) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>$(& $esc $f.Flow)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $f.Environment) &middot; last run $(& $fmt $f.Last) &middot; $($f.Failed) failed of $($f.Runs) runs in 7 days</span>" +
@@ -39,9 +39,9 @@ $flowRow = { param($f) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e
                          "<td style=""padding:10px 0 10px 12px;border-top:1px solid #e2e4e7;text-align:right;white-space:nowrap""><a href=""$(& $url $f)"" style=""display:inline-block;padding:6px 12px;border-radius:4px;background:$($col.bad);color:#fff;text-decoration:none;font-size:12px;font-weight:600"">Open flow</a></td></tr>" }
 $card = { param($title, $body) "<div style=""background:#fff;border:1px solid $($col.line);border-radius:6px;padding:14px 16px;margin:0 0 12px""><div style=""font-size:15px;font-weight:600;margin-bottom:6px"">$title</div>$body</div>" }
 $wrap = { param($kicker, $title, $inner)
-    "<!doctype html><html><body style=""margin:0;padding:24px 16px;background:$($col.bg);color:$($col.fg);font:14px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif"">" +
-    "<div style=""max-width:600px;margin:0 auto""><div style=""color:$($col.muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em"">Support Watch</div>" +
-    "<h1 style=""font-size:20px;margin:2px 0 16px"">$title</h1>$inner" +
+    "<!doctype html><html><body style=""margin:0;padding:24px 16px;background:$($col.bg);color:$($col.fg);font:14px/1.5 'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif"">" +
+    "<div style=""max-width:600px;margin:0 auto""><div style=""color:$($col.bad);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em"">Ridgebase &middot; Support Watch</div>" +
+    "<h1 style=""font:400 26px/1.15 'Palatino Linotype',Palatino,Georgia,serif;letter-spacing:-.01em;margin:2px 0 16px"">$title</h1>$inner" +
     "<div style=""color:$($col.muted);font-size:12px;margin-top:16px"">$kicker &middot; <a href=""$page"" style=""color:$($col.muted)"">Open the dashboard</a></div></div></body></html>" }
 
 # --- real-time: new failures since the last run ---------------------------------------------------------------
