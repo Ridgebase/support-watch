@@ -95,13 +95,23 @@ foreach ($c in $clients) {
             $ph = @{ Authorization = "Bearer $($pt.access_token)" }
             $groups = @((Invoke-RestMethod -Uri 'https://api.powerbi.com/v1.0/myorg/groups' -Headers $ph).value | Where-Object { $_.name -in $c.PowerBI })
             foreach ($missing in @($c.PowerBI | Where-Object { $_ -notin $groups.name })) { $failures += "$($c.Name): Power BI workspace not found: $missing" }
+            # Next scheduled refresh: the schedule gives weekdays (empty = every day), "HH:mm" times and its own time zone.
+            $nextRefresh = { param($sch)
+                if (-not $sch -or -not $sch.enabled -or -not $sch.times) { return '' }
+                $stz = try { [TimeZoneInfo]::FindSystemTimeZoneById($sch.localTimeZoneId) } catch { $tz }
+                $nowS = [TimeZoneInfo]::ConvertTimeFromUtc($nowUtc, $stz); $days = if ($sch.days) { @($sch.days) } else { [Enum]::GetNames([DayOfWeek]) }; $best = $null
+                foreach ($d in 0..7) { $day = $nowS.Date.AddDays($d); if ($days -notcontains $day.DayOfWeek.ToString()) { continue }
+                    foreach ($t in $sch.times) { $cand = $day.Add([TimeSpan]::Parse($t)); if ($cand -gt $nowS -and (-not $best -or $cand -lt $best)) { $best = $cand } } }
+                if ($best) { [TimeZoneInfo]::ConvertTimeFromUtc([TimeZoneInfo]::ConvertTimeToUtc($best, $stz), $tz).ToString('s') } else { '' }
+            }
             foreach ($g in $groups) {
                 foreach ($ds in (Invoke-RestMethod -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($g.id)/datasets" -Headers $ph).value) {
-                    $r = try { @((Invoke-RestMethod -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($g.id)/datasets/$($ds.id)/refreshes?`$top=1" -Headers $ph).value)[0] } catch { $null }
+                    $r   = try { @((Invoke-RestMethod -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($g.id)/datasets/$($ds.id)/refreshes?`$top=1" -Headers $ph).value)[0] } catch { $null }
+                    $sch = try { Invoke-RestMethod -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($g.id)/datasets/$($ds.id)/refreshSchedule" -Headers $ph } catch { $null }
                     $toLocal = { param($s) if ($s) { [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal), $tz).ToString('s') } else { '' } }
                     $pbi.Add([pscustomobject]@{ Client = $c.Name; Workspace = $g.name; WorkspaceId = $g.id; Model = $ds.name; ModelId = $ds.id
                         Start = (& $toLocal $r.startTime); End = (& $toLocal $r.endTime); Status = $(if ($r) { $r.status } else { 'NO_REFRESH' }); Type = "$($r.refreshType)"
-                        Url = "https://app.powerbi.com/groups/$($g.id)/settings/datasets/$($ds.id)" })
+                        Next = (& $nextRefresh $sch); Url = "https://app.powerbi.com/groups/$($g.id)/settings/datasets/$($ds.id)" })
                 }
             }
             Write-Host "$($c.Name): Power BI, $(@($pbi | Where-Object Client -eq $c.Name).Count) model(s) in $($groups.Count) workspace(s)"
