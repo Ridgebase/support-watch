@@ -48,7 +48,6 @@ jobs:
           action: upload
           app_location: out/site
           skip_app_build: true
-          skip_api_build: true
 
       # After the deploy so a mail problem never blocks the page. A failure here turns the job red and GitHub emails the owner.
       # A run is pinned to the commit it was triggered on, so a run that waited behind another would read stale alerts.json,
