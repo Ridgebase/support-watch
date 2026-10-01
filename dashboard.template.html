@@ -104,7 +104,7 @@ function health(client) {
     <div class="kpi"><div class="big">${pct(tOk, tOk + tBad)}</div><small>Today's success rate (${tOk} / ${tOk + tBad} runs)</small></div>
     <div class="stat"><div class="big">${total7}</div><small>Runs, last 7 days</small></div>
     <div class="stat"><a href="#failed" class="big ${failed7 ? 'c-bad' : ''}">${failed7}</a><small>Failed, last 7 days</small></div>
-    <div class="stat"><a href="#flows" data-problems class="big ${red ? 'c-bad' : yellow ? 'c-warn' : ''}">${red + yellow}</a><small>Flows needing attention</small></div>
+    <div class="stat"><a href="#flows" class="big ${red ? 'c-bad' : yellow ? 'c-warn' : ''}">${red + yellow}</a><small>Flows needing attention</small></div>
     <div class="stat"><a href="#unreachable" class="big ${unreadable ? 'c-grey' : ''}">${unreadable}</a><small>Unreachable flows</small></div>
     <div class="last">${lastPer.map(f => `<div>Last run${clients.length > 1 ? ' ' + esc(f.client) : ''}: <b>${esc(f.flow)}</b> · <b class="${statusClass(f.lastStatus)}">${esc(f.lastStatus)}</b> · ${fmt(f.last)}</div>`).join('') || '<div>No runs yet</div>'}</div>
   </div>`;
@@ -149,8 +149,6 @@ function render() {
 }
 // Copy button: writes the flow's URL to the clipboard and shows a check mark for a moment.
 document.getElementById('out').addEventListener('click', e => {
-  // The "needing attention" number jumps to the flows table with "problems only" ticked, so the table shows just those rows.
-  const a = e.target.closest('a[data-problems]'); if (a) { document.getElementById('problems').checked = true; render(); return; }
   const b = e.target.closest('button.copy'); if (!b) return;
   navigator.clipboard.writeText(b.dataset.url).then(() => { b.textContent = '✓'; setTimeout(() => b.textContent = '⧉', 1200); });
 });
