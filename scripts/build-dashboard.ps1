@@ -47,5 +47,5 @@ New-Item -ItemType Directory -Force $OutDir | Out-Null
 $html = (Get-Content "$PSScriptRoot/dashboard.template.html" -Raw -Encoding UTF8).Replace('__DATA__', $data)
 [IO.File]::WriteAllText("$OutDir/index.html", $html, [Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText("$OutDir/data.json", $data, [Text.UTF8Encoding]::new($false))
-Copy-Item "$PSScriptRoot/staticwebapp.config.json", "$PSScriptRoot/forbidden.html" $OutDir   # Azure Static Web Apps: sign-in required, invited "reader" role only
+Copy-Item "$PSScriptRoot/staticwebapp.config.json", "$PSScriptRoot/forbidden.html", "$PSScriptRoot/signed-out.html" $OutDir   # Azure Static Web Apps: sign-in required, invited "reader" role only
 Write-Host "Site written to $OutDir ($($flows.Count) flows, $($days.Count) client-days, $($fails.Count) failed runs, $([int]($html.Length / 1024)) KB)"

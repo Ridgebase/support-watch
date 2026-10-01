@@ -2,6 +2,7 @@
   "routes": [
     { "route": "/.auth/login/github", "statusCode": 404 },
     { "route": "/.auth/*", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/signed-out.html", "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/*", "allowedRoles": ["reader"] }
   ],
   "responseOverrides": {
