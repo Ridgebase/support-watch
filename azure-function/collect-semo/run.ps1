@@ -9,16 +9,16 @@ $ErrorActionPreference = 'Stop'
 $env:CLIENTS_JSON = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:CLIENTS_JSON_B64))
 
 $work = Join-Path ([IO.Path]::GetTempPath()) 'support-watch'   # wwwroot is read-only on the consumption plan
-New-Item -ItemType Directory -Force $work | Out-Null
-$raw = 'https://raw.githubusercontent.com/Ridgebase/support-watch/main'
+New-Item -ItemType Directory -Force (Join-Path $work 'scripts') | Out-Null
+$raw = 'https://raw.githubusercontent.com/Ridgebase/support-watch/main/scripts'
 foreach ($f in 'collect.ps1', 'build-dashboard.ps1', 'dashboard.template.html') {
-    Invoke-WebRequest -Uri "$raw/${f}?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" -OutFile (Join-Path $work $f)
+    Invoke-WebRequest -Uri "$raw/${f}?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" -OutFile (Join-Path $work "scripts/$f")
 }
 
-& (Join-Path $work 'collect.ps1')   # writes flow-runs.csv, powerbi.csv, then site/data.json via build-dashboard.ps1
+& (Join-Path $work 'scripts/collect.ps1')   # writes out/flow-runs.csv, out/powerbi.csv, then out/site/data.json via build-dashboard.ps1
 if ($LASTEXITCODE) { throw "collect.ps1 exited with $LASTEXITCODE (no client collected)" }
 
-$json = [IO.File]::ReadAllText((Join-Path $work 'site/data.json'))
+$json = [IO.File]::ReadAllText((Join-Path $work 'out/site/data.json'))
 $body = @{ files = @{ 'data.json' = @{ content = $json } } } | ConvertTo-Json -Depth 5
 Invoke-RestMethod -Method Patch -Uri "https://api.github.com/gists/$($env:GIST_ID)" -Headers @{ Authorization = "Bearer $($env:GIST_TOKEN)"; Accept = 'application/vnd.github+json' } -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
 Write-Host "data.json published to gist $($env:GIST_ID) ($([int]($json.Length / 1024)) KB)"

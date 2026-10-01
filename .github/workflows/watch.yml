@@ -43,11 +43,11 @@ jobs:
           RT_SEMO:      ${{ secrets.RT_SEMO }}
           RT_TSMO:      ${{ secrets.RT_TSMO }}
           CARRY_URL:    ${{ secrets.CARRY_URL }}
-        run: ./collect.ps1
+        run: ./scripts/collect.ps1
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: out/site
 
       - id: deploy
         uses: actions/deploy-pages@v4
@@ -62,14 +62,14 @@ jobs:
           SMTP_USER:     ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           MAIL_TO:       ${{ secrets.MAIL_TO }}
-        run: git pull -q --ff-only; ./notify.ps1 -Sample:('${{ inputs.sample }}' -eq 'true') -SampleDigest:('${{ inputs.digest }}' -eq 'true')
+        run: git pull -q --ff-only; ./scripts/notify.ps1 -Sample:('${{ inputs.sample }}' -eq 'true') -SampleDigest:('${{ inputs.digest }}' -eq 'true')
 
       - name: Save alert state; keep the schedule alive (one commit a day)
         if: always()
         run: |
           today=$(date -u +%F)
-          [ "$(cat last-run.txt 2>/dev/null)" = "$today" ] || echo "$today" > last-run.txt
-          git add last-run.txt alerts.json
+          [ "$(cat state/last-run.txt 2>/dev/null)" = "$today" ] || echo "$today" > state/last-run.txt
+          git add state/last-run.txt state/alerts.json
           if ! git diff --cached --quiet; then
             git config user.name  "support-watch bot"
             git config user.email "support-watch@users.noreply.github.com"

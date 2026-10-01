@@ -1,6 +1,6 @@
 # Cloud collector: runs on GitHub Actions (PowerShell 7 on Linux), no PC involved.
 # Signs in with a refresh token per client, pulls flows + runs for the listed environments in parallel,
-# writes flow-runs.csv, then build-dashboard.ps1 renders the page and deploys it to Netlify.
+# writes out/flow-runs.csv, then build-dashboard.ps1 renders the page into out/site.
 #
 # Config comes from environment variables (GitHub secrets), never from the repo:
 #   CLIENTS_JSON   [{"Name":"SEMO","Tenant":"seguinmorris.com","Environments":["..."]}, ...]
@@ -26,6 +26,7 @@ $tz        = [TimeZoneInfo]::FindSystemTimeZoneById('America/Toronto')
 $nowUtc    = [datetime]::UtcNow
 $collected = [TimeZoneInfo]::ConvertTimeFromUtc($nowUtc, $tz).ToString('s')
 $since     = $nowUtc.AddDays(-$Days)
+$out       = Join-Path (Split-Path $PSScriptRoot) 'out'; New-Item -ItemType Directory -Force $out | Out-Null   # everything generated lives in out/
 $rows      = [System.Collections.Generic.List[object]]::new()
 $pbi       = [System.Collections.Generic.List[object]]::new()   # one row per semantic model: its last refresh
 $failures  = @()
@@ -122,7 +123,7 @@ foreach ($c in $clients) {
 # Carry-over: a client that could not be signed in from here is taken from CARRY_URL, a data.json that the laptop
 # collector (flow-runs.ps1) publishes to a gist whenever it runs. Its snapshot time is kept, so the page shows STALE
 # for that client once the laptop has been off for an hour, instead of the client vanishing.
-Remove-Item "$PSScriptRoot/carry.json" -ErrorAction SilentlyContinue
+Remove-Item "$out/carry.json" -ErrorAction SilentlyContinue
 if ($blocked -and $env:CARRY_URL) {
     try {
         $c = Invoke-RestMethod -Uri "$($env:CARRY_URL)?t=$(Get-Date -UFormat %s)"   # cache-buster: gist raw URLs are cached ~5 min
@@ -133,15 +134,15 @@ if ($blocked -and $env:CARRY_URL) {
             $carry.powerbi += @($c.powerbi | Where-Object Client -eq $name)
             Write-Host "$name`: carried over $(@($c.flows | Where-Object Client -eq $name).Count) flows from $($c.snapshots.$name)"
         }
-        $carry | ConvertTo-Json -Depth 5 -Compress | Set-Content "$PSScriptRoot/carry.json" -Encoding UTF8
+        $carry | ConvertTo-Json -Depth 5 -Compress | Set-Content "$out/carry.json" -Encoding UTF8
     } catch { $failures += "carry-over failed: $_" }
 }
 
 # Stamp the snapshot when the collection ends: on the laptop it takes minutes, and a run that started meanwhile
 # would otherwise show a start later than its own snapshot on the page.
 $collected = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s'); foreach ($r in $rows) { $r.Collected = $collected }
-if ($rows.Count) { $rows | Export-Csv -Path "$PSScriptRoot/flow-runs.csv" -NoTypeInformation -Encoding UTF8 }
-if ($pbi.Count)  { $pbi  | Export-Csv -Path "$PSScriptRoot/powerbi.csv"   -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$PSScriptRoot/powerbi.csv" -ErrorAction SilentlyContinue }
+if ($rows.Count) { $rows | Export-Csv -Path "$out/flow-runs.csv" -NoTypeInformation -Encoding UTF8 }
+if ($pbi.Count)  { $pbi  | Export-Csv -Path "$out/powerbi.csv"   -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/powerbi.csv" -ErrorAction SilentlyContinue }
 & "$PSScriptRoot/build-dashboard.ps1"
 $failures | ForEach-Object { Write-Warning $_ }
 # Fail the job (GitHub emails the repo owner) only when nothing at all was collected: the collector itself is broken.

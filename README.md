@@ -6,12 +6,21 @@ status, today's success rate, last run per client, a 7-day table, then every flo
 Live page: https://ridgebase.github.io/support-watch/ (rebuilt every 10 minutes by the GitHub Actions workflow and
 published to GitHub Pages: free and without a deploy quota, unlike Netlify's free plan at 15 credits per deploy).
 
+## Layout
+
+- `scripts/` — `collect.ps1`, `build-dashboard.ps1`, `dashboard.template.html`, `notify.ps1`, `get-refresh-token.ps1`, and the
+  local-only `flow-runs.ps1` (gitignored).
+- `state/` — `alerts.json` and `last-run.txt`, committed by the workflow.
+- `out/` — everything generated (CSVs, `site/`, `run.log`), gitignored.
+- `azure-function/` — the Canada Central collector for SEMO.
+- `.github/workflows/watch.yml` — the cloud job.
+
 ## How it runs
 
 - `collect.ps1` signs in to each client tenant with a **refresh token**, reads flows and their runs for the
-  configured environments through the Flow REST API, and writes `flow-runs.csv`.
-- `build-dashboard.ps1` aggregates that CSV into `site/data.json` (per-flow and per-day totals, failed runs; ~40 KB
-  instead of every run) and renders `site/index.html` from `dashboard.template.html`.
+  configured environments through the Flow REST API, and writes `out/flow-runs.csv`.
+- `build-dashboard.ps1` aggregates that CSV into `out/site/data.json` (per-flow and per-day totals, failed runs; ~40 KB
+  instead of every run) and renders `out/site/index.html` from `dashboard.template.html`.
 - `.github/workflows/watch.yml` runs both every 10 minutes. GitHub throttles its own `schedule` trigger (gaps of ~30 min
   were observed), so the 10-minute cadence comes from a free cron-job.org job that POSTs to the workflow's
   `dispatches` API with a fine-grained token (repo `support-watch`, permission Actions read/write, approved by an

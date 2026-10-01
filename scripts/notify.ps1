@@ -15,7 +15,7 @@
 #   gh workflow run watch.yml --repo Ridgebase/support-watch -f sample=true
 # -SampleDigest sends the weekly recap now, whatever the day, prefixed [Sample], without saving state:
 #   gh workflow run watch.yml --repo Ridgebase/support-watch -f digest=true
-param([string]$Data = "$PSScriptRoot/site/data.json", [string]$State = "$PSScriptRoot/alerts.json", [switch]$DryRun, [switch]$Sample, [switch]$SampleDigest)
+param([string]$Data = "$PSScriptRoot/../out/site/data.json", [string]$State = "$PSScriptRoot/../state/alerts.json", [switch]$DryRun, [switch]$Sample, [switch]$SampleDigest)
 $ErrorActionPreference = 'Stop'
 $page = 'https://ridgebase.github.io/support-watch/'
 

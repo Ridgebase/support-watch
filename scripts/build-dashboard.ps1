@@ -4,10 +4,10 @@
 # Optional carry.json (same shape as data.json) supplies clients that could not be collected this run.
 # Runs on Windows PowerShell 5.1 (laptop) and PowerShell 7 (GitHub Actions).
 param(
-    [string]$Csv    = "$PSScriptRoot/flow-runs.csv",
-    [string]$PbiCsv = "$PSScriptRoot/powerbi.csv",
-    [string]$OutDir = "$PSScriptRoot/site",
-    [string]$Carry  = "$PSScriptRoot/carry.json"
+    [string]$Csv    = "$PSScriptRoot/../out/flow-runs.csv",
+    [string]$PbiCsv = "$PSScriptRoot/../out/powerbi.csv",
+    [string]$OutDir = "$PSScriptRoot/../out/site",
+    [string]$Carry  = "$PSScriptRoot/../out/carry.json"
 )
 $rows  = if (Test-Path $Csv) { @(Import-Csv $Csv) } else { @() }
 $isRun = { $_.Status -ne 'NO_RUNS' -and $_.Status -ne 'UNREADABLE' }
