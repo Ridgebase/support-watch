@@ -39,8 +39,9 @@ All client-specific values live in GitHub secrets, nothing in this repo:
 ## Email alerts
 
 `notify.ps1` runs after each deploy. It emails one message per run listing the flows whose latest run has **newly**
-failed (a flow that keeps failing is announced once, until it recovers), and one digest a day after 07:00 Eastern
-with yesterday's totals and the flows failing now. No digest in the morning = the job itself is broken.
+failed (a flow that keeps failing is announced once, until it recovers), and one weekly recap on Monday after 07:00
+Eastern with the last 7 days' totals per client and every flow that failed in the week. No recap on Monday morning =
+the job itself is broken. `gh workflow run watch.yml -f digest=true` sends a sample recap right away.
 `alerts.json` (committed by the workflow) remembers what was already announced.
 
 Mail is sent over SMTP from a team member's Google Workspace account with an app password: Ridgebase's mail is
