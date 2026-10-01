@@ -95,7 +95,7 @@ const cls = f => !f.enabled ? 'off' : f.lastStatus === 'Failed' ? 'bad' : f.fail
 const problem = f => ['bad', 'warn'].includes(cls(f));
 // Copy icon from svgrepo (copy-svgrepo-com.svg), fill follows the text colour.
 const COPY_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M15.24 2H11.3458C9.58159 1.99999 8.18418 1.99997 7.09054 2.1476C5.96501 2.29953 5.05402 2.61964 4.33559 3.34096C3.61717 4.06227 3.29833 4.97692 3.14701 6.10697C2.99997 7.205 2.99999 8.60802 3 10.3793V16.2169C3 17.725 3.91995 19.0174 5.22717 19.5592C5.15989 18.6498 5.15994 17.3737 5.16 16.312L5.16 11.3976L5.16 11.3024C5.15993 10.0207 5.15986 8.91644 5.27828 8.03211C5.40519 7.08438 5.69139 6.17592 6.4253 5.43906C7.15921 4.70219 8.06404 4.41485 9.00798 4.28743C9.88877 4.16854 10.9887 4.1686 12.2652 4.16867L12.36 4.16868H15.24L15.3348 4.16867C16.6113 4.1686 17.7088 4.16854 18.5896 4.28743C18.0627 2.94779 16.7616 2 15.24 2Z"/><path d="M6.6001 11.3974C6.6001 8.67119 6.6001 7.3081 7.44363 6.46118C8.28716 5.61426 9.64481 5.61426 12.3601 5.61426H15.2401C17.9554 5.61426 19.313 5.61426 20.1566 6.46118C21.0001 7.3081 21.0001 8.6712 21.0001 11.3974V16.2167C21.0001 18.9429 21.0001 20.306 20.1566 21.1529C19.313 21.9998 17.9554 21.9998 15.2401 21.9998H12.3601C9.64481 21.9998 8.28716 21.9998 7.44363 21.1529C6.6001 20.306 6.6001 18.9429 6.6001 16.2167V11.3974Z"/></svg>';
-const copyBtn = url => url ? `<button class="copy" data-url="${esc(url)}" title="Copy the flow's Power Automate URL">${COPY_SVG}</button>` : '';
+const copyBtn = url => url ? `<button class="copy" data-url="${esc(url)}" title="Copy the URL">${COPY_SVG}</button>` : '';
 const fmt = iso => iso ? iso.replace('T', ' ').slice(0, 16) : '—';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '—';
@@ -147,6 +147,19 @@ function health(client) {
 function render() {
   const only = document.getElementById('problems').checked, hideQuiet = document.getElementById('hidequiet').checked, client = sel.value;
   let h = health(client);
+
+  // Power BI: last refresh per semantic model. Unknown = refresh in progress; Disabled = schedule switched off.
+  // A model not refreshed for a week is muted whatever its status: an abandoned sandbox is not an incident.
+  const pbiCls = r => !r.Start || Date.now() - new Date(r.Start) > 7 * 864e5 ? 'off' : r.Status === 'Completed' ? 'ok' : r.Status === 'Failed' ? 'bad' : r.Status === 'Unknown' ? '' : 'warn';
+  const pbiLabel = r => r.Status === 'Unknown' ? 'Running' : r.Status === 'Completed' ? 'Succeeded' : r.Status;
+  const dur = r => r.Start && r.End ? Math.max(1, Math.round((new Date(r.End) - new Date(r.Start)) / 60e3)) + ' min' : '—';
+  const pbi = (data.powerbi || []).filter(r => (!client || r.Client === client) && (!only || ['bad', 'warn'].includes(pbiCls(r))))
+    .sort((a, b) => a.Client.localeCompare(b.Client) || a.Workspace.localeCompare(b.Workspace) || a.Model.localeCompare(b.Model));
+  if (pbi.length) {
+    h += `<h2 id="powerbi">Power BI refreshes <span class="muted">(${pbi.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Workspace</th><th>Model</th><th>Last refresh</th><th class="num">Duration</th><th>Type</th><th>Status</th></tr></thead><tbody>`;
+    for (const r of pbi) h += `<tr class="${pbiCls(r)}"><td>${esc(r.Client)}</td><td>${esc(r.Workspace)}</td><td class="flow">${esc(r.Model)}${copyBtn(r.Url)}</td><td>${fmt(r.Start)}</td><td class="num">${dur(r)}</td><td>${esc(r.Type)}</td><td class="${statusClass(pbiLabel(r))}">${esc(pbiLabel(r))}</td></tr>`;
+    h += '</tbody></table></div>';
+  }
 
   const rank = { bad: 0, warn: 1, ok: 2, '': 3, off: 4 };
   const list = summary.filter(f => (!client || f.client === client) && (!only || problem(f)) && (!hideQuiet || f.runs > 0))

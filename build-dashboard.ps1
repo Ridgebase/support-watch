@@ -5,12 +5,14 @@
 # Runs on Windows PowerShell 5.1 (laptop) and PowerShell 7 (GitHub Actions).
 param(
     [string]$Csv    = "$PSScriptRoot/flow-runs.csv",
+    [string]$PbiCsv = "$PSScriptRoot/powerbi.csv",
     [string]$OutDir = "$PSScriptRoot/site",
     [string]$Carry  = "$PSScriptRoot/carry.json"
 )
 $rows  = if (Test-Path $Csv) { @(Import-Csv $Csv) } else { @() }
 $isRun = { $_.Status -ne 'NO_RUNS' -and $_.Status -ne 'UNREADABLE' }
 $snapshots = @{}; $flows = @(); $days = @(); $fails = @()
+$powerbi = if (Test-Path $PbiCsv) { @(Import-Csv $PbiCsv) } else { @() }   # last refresh per Power BI semantic model, from collect.ps1
 
 foreach ($g in $rows | Group-Object Client) {
     $snapshots[$g.Name] = ($g.Group | Sort-Object Collected -Descending)[0].Collected
@@ -37,10 +39,10 @@ foreach ($g in $rows | Group-Object Client) {
 if (Test-Path $Carry) {
     $c = Get-Content $Carry -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($p in $c.snapshots.PSObject.Properties) { $snapshots[$p.Name] = $p.Value }
-    $flows += @($c.flows); $days += @($c.days); $fails += @($c.fails)
+    $flows += @($c.flows); $days += @($c.days); $fails += @($c.fails); $powerbi += @($c.powerbi)
 }
 
-$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails } | ConvertTo-Json -Depth 5 -Compress
+$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi } | ConvertTo-Json -Depth 5 -Compress
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $html = (Get-Content "$PSScriptRoot/dashboard.template.html" -Raw -Encoding UTF8).Replace('__DATA__', $data)
 [IO.File]::WriteAllText("$OutDir/index.html", $html, [Text.UTF8Encoding]::new($false))

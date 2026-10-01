@@ -52,6 +52,23 @@ $key     = { param($f) "$($f.Client)|$($f.FlowId)" }
 $iso     = { param($s) if ($s -is [datetime]) { $s.ToString('s') } else { "$s" } }   # pwsh 7 parses JSON dates into [datetime]; compare as ISO strings on both engines
 $new     = @($failed | Where-Object { $k = & $key $_; -not $open.ContainsKey($k) -or (& $iso $_.LastFailed) -gt (& $iso $open[$k]) })
 $open    = @{}; foreach ($f in $failed) { $open[(& $key $f)] = & $iso $f.LastFailed }   # flows whose failures left the 7-day window drop out silently
+# Power BI: a semantic model whose last refresh failed within the window and was not announced yet (same rule, own key).
+# A failure older than 7 days is never news (an abandoned sandbox would otherwise alert at the first run after a state reset).
+$weekAgo   = $now.AddDays(-7).ToString('s')
+$pbiFailed = @($d.powerbi | Where-Object { $_.Status -eq 'Failed' -and $_.Start -and (& $iso $_.Start) -gt $weekAgo })
+$pbiNew    = @(if (-not ($Sample -or $SampleDigest)) { $pbiFailed | Where-Object { $k = "$($_.Client)|pbi|$($_.ModelId)"; -not $open.ContainsKey($k) -or (& $iso $_.Start) -gt (& $iso $open[$k]) } })   # @() outside the if: a one-element result would otherwise unwrap
+foreach ($r in $pbiFailed) { $open["$($r.Client)|pbi|$($r.ModelId)"] = & $iso $r.Start }
+$pbiRow = { param($r) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>$(& $esc $r.Model)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $r.Workspace) &middot; refresh failed $(& $fmt $r.Start) &middot; $(& $esc $r.Type)</span>" +
+                        "<div style=""margin-top:6px;font:11px/1.4 Consolas,Menlo,monospace;color:$($col.muted);word-break:break-all"">$($r.Url)</div></td>" +
+                        "<td style=""padding:10px 0 10px 12px;border-top:1px solid #e2e4e7;text-align:right;white-space:nowrap""><a href=""$($r.Url)"" style=""display:inline-block;padding:6px 12px;border-radius:4px;background:$($col.bad);color:#fff;text-decoration:none;font-size:12px;font-weight:600"">Open model</a></td></tr>" }
+if ($pbiNew) {
+    $cards = foreach ($g in $pbiNew | Group-Object Client) {
+        & $card "$($g.Name) $(& $pill "$($g.Count) refresh failed" $col.bad $col.badbg)" "<table style=""width:100%;border-collapse:collapse"">$(($g.Group | ForEach-Object { & $pbiRow $_ }) -join '')</table>"
+    }
+    $mails += @{ subject = "[Support Watch] Power BI: $(($pbiNew | Group-Object Client | ForEach-Object { "$($_.Name): $($_.Count) refresh failed" }) -join ', ')"
+                 body    = & $wrap 'Open the model settings, then Refresh history, to read the error' "$($pbiNew.Count) Power BI refresh$(if ($pbiNew.Count -gt 1) { 'es' }) failed" ($cards -join '') }
+}
+
 if ($new -and -not $SampleDigest) {
     $cards = foreach ($g in $new | Group-Object Client) {
         & $card "$($g.Name) $(& $pill "$($g.Count) failed" $col.bad $col.badbg)" "<table style=""width:100%;border-collapse:collapse"">$(($g.Group | ForEach-Object { & $flowRow $_ }) -join '')</table>"
@@ -74,7 +91,9 @@ if (($now.DayOfWeek -eq 'Monday' -and $now.Hour -ge 7 -and $digest -ne $today -a
         $rate = if ($ok + $bad) { "$([math]::Round(100 * $ok / ($ok + $bad), 2))%" } else { '&mdash;' }
         $week = if ($runs) { "<b>$runs</b> runs &middot; <b style=""color:$(if ($bad) { $col.bad } else { $col.ok })"">$bad</b> failed &middot; $can cancelled &middot; $rate success" } else { 'no runs' }
         $rows = if ($hit) { "<div style=""color:$($col.muted);font-size:12px;margin-top:10px"">Flows with failures this week</div><table style=""width:100%;border-collapse:collapse"">$(($hit | ForEach-Object { & $flowRow $_ }) -join '')</table>" } else { '' }
-        & $card "$c $pills" "<div style=""color:$($col.muted);font-size:12px"">Last 7 days</div><div>$week</div>$rows"
+        $pb = @($d.powerbi | Where-Object Client -eq $c); $pbBad = @($pb | Where-Object { $_.Status -eq 'Failed' -and (& $iso $_.Start) -gt $weekAgo })
+        $pbLine = if ($pb) { "<div style=""color:$($col.muted);font-size:12px;margin-top:10px"">Power BI</div><div>$($pb.Count) models &middot; <b style=""color:$(if ($pbBad) { $col.bad } else { $col.ok })"">$($pbBad.Count)</b> with a failed last refresh$(if ($pbBad) { ': ' + (($pbBad | ForEach-Object { & $esc $_.Model }) -join ', ') })</div>" } else { '' }
+        & $card "$c $pills" "<div style=""color:$($col.muted);font-size:12px"">Last 7 days</div><div>$week</div>$pbLine$rows"
     }
     $short = ($clients | ForEach-Object { $n = @($failing | Where-Object Client -eq $_).Count; "$_ $(if ($n) { "$n failing" } else { 'healthy' })" }) -join ', '
     $mails += @{ subject = "$(if ($SampleDigest) { '[Sample] ' })[Support Watch] Weekly recap $from to ${to}: $short"; body = & $wrap "Recap of $from to $to, sent every Monday morning; no recap means the job is down" "Week in review: $short" ($cards -join '') }

@@ -6,6 +6,8 @@
 #   CLIENTS_JSON   [{"Name":"SEMO","Tenant":"seguinmorris.com","Environments":["..."]}, ...]
 #                  optional per client: "FlowDays": {"<flow display name>": 1} shortens the window for a flow whose
 #                  thousands of runs a week would otherwise take minutes to page through (its 7-day totals then cover only those days)
+#                  optional per client: "PowerBI": ["<workspace name>", ...] also collects the last refresh of every semantic
+#                  model in those workspaces (same refresh token, exchanged for a Power BI API token) into powerbi.csv
 #   RT_<NAME>      the client's refresh token (from get-refresh-token.ps1), e.g. RT_SEMO
 #   NETLIFY_TOKEN  used by build-dashboard.ps1
 param([int]$Days = 7, [int]$Parallel = 8)
@@ -25,6 +27,7 @@ $nowUtc    = [datetime]::UtcNow
 $collected = [TimeZoneInfo]::ConvertTimeFromUtc($nowUtc, $tz).ToString('s')
 $since     = $nowUtc.AddDays(-$Days)
 $rows      = [System.Collections.Generic.List[object]]::new()
+$pbi       = [System.Collections.Generic.List[object]]::new()   # one row per semantic model: its last refresh
 $failures  = @()
 $blocked   = @()   # clients whose sign-in failed this run
 
@@ -84,6 +87,26 @@ foreach ($c in $clients) {
         }
     }
     Write-Host "$($c.Name): $($envs.Count) environment(s), $(@($rows | Where-Object Client -eq $c.Name).Count) rows"
+
+    # Power BI: last refresh per semantic model in the listed workspaces. Refresh times come back as UTC ISO strings.
+    if ($c.PowerBI) {
+        try {
+            $pt = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$($c.Tenant)/oauth2/v2.0/token" -Body @{ grant_type = 'refresh_token'; client_id = $clientId; refresh_token = $rt; scope = 'https://analysis.windows.net/powerbi/api/.default offline_access' }
+            $ph = @{ Authorization = "Bearer $($pt.access_token)" }
+            $groups = @((Invoke-RestMethod -Uri 'https://api.powerbi.com/v1.0/myorg/groups' -Headers $ph).value | Where-Object { $_.name -in $c.PowerBI })
+            foreach ($missing in @($c.PowerBI | Where-Object { $_ -notin $groups.name })) { $failures += "$($c.Name): Power BI workspace not found: $missing" }
+            foreach ($g in $groups) {
+                foreach ($ds in (Invoke-RestMethod -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($g.id)/datasets" -Headers $ph).value) {
+                    $r = try { @((Invoke-RestMethod -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($g.id)/datasets/$($ds.id)/refreshes?`$top=1" -Headers $ph).value)[0] } catch { $null }
+                    $toLocal = { param($s) if ($s) { [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal), $tz).ToString('s') } else { '' } }
+                    $pbi.Add([pscustomobject]@{ Client = $c.Name; Workspace = $g.name; WorkspaceId = $g.id; Model = $ds.name; ModelId = $ds.id
+                        Start = (& $toLocal $r.startTime); End = (& $toLocal $r.endTime); Status = $(if ($r) { $r.status } else { 'NO_REFRESH' }); Type = "$($r.refreshType)"
+                        Url = "https://app.powerbi.com/groups/$($g.id)/settings/datasets/$($ds.id)" })
+                }
+            }
+            Write-Host "$($c.Name): Power BI, $(@($pbi | Where-Object Client -eq $c.Name).Count) model(s) in $($groups.Count) workspace(s)"
+        } catch { $failures += "$($c.Name): Power BI collection failed: $($_.Exception.Message)" }
+    }
 }
 
 # Carry-over: a client that could not be signed in from here is taken from CARRY_URL, a data.json that the laptop
@@ -93,10 +116,11 @@ Remove-Item "$PSScriptRoot/carry.json" -ErrorAction SilentlyContinue
 if ($blocked -and $env:CARRY_URL) {
     try {
         $c = Invoke-RestMethod -Uri "$($env:CARRY_URL)?t=$(Get-Date -UFormat %s)"   # cache-buster: gist raw URLs are cached ~5 min
-        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @() }
+        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @() }
         foreach ($name in $blocked) {
             if ($c.snapshots.$name) { $carry.snapshots[$name] = $c.snapshots.$name }
             $carry.flows += @($c.flows | Where-Object Client -eq $name); $carry.days += @($c.days | Where-Object Client -eq $name); $carry.fails += @($c.fails | Where-Object Client -eq $name)
+            $carry.powerbi += @($c.powerbi | Where-Object Client -eq $name)
             Write-Host "$name`: carried over $(@($c.flows | Where-Object Client -eq $name).Count) flows from $($c.snapshots.$name)"
         }
         $carry | ConvertTo-Json -Depth 5 -Compress | Set-Content "$PSScriptRoot/carry.json" -Encoding UTF8
@@ -107,6 +131,7 @@ if ($blocked -and $env:CARRY_URL) {
 # would otherwise show a start later than its own snapshot on the page.
 $collected = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s'); foreach ($r in $rows) { $r.Collected = $collected }
 if ($rows.Count) { $rows | Export-Csv -Path "$PSScriptRoot/flow-runs.csv" -NoTypeInformation -Encoding UTF8 }
+if ($pbi.Count)  { $pbi  | Export-Csv -Path "$PSScriptRoot/powerbi.csv"   -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$PSScriptRoot/powerbi.csv" -ErrorAction SilentlyContinue }
 & "$PSScriptRoot/build-dashboard.ps1"
 $failures | ForEach-Object { Write-Warning $_ }
 # Fail the job (GitHub emails the repo owner) only when nothing at all was collected: the collector itself is broken.
