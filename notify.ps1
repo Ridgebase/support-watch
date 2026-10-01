@@ -67,7 +67,7 @@ if (($now.DayOfWeek -eq 'Monday' -and $now.Hour -ge 7 -and $digest -ne $today -a
         $hit  = @($d.flows | Where-Object { $_.Client -eq $c -and $_.Failed -gt 0 } | Sort-Object { -$_.Failed }, Flow)   # every flow that failed in the week, failing-now or recovered
         $age  = [datetime]::UtcNow - [TimeZoneInfo]::ConvertTimeToUtc([datetime]$d.snapshots.$c, $tz)
         $pills = $(if ($red) { & $pill "$($red.Count) failing" $col.bad $col.badbg } else { & $pill 'Healthy' $col.ok $col.okbg }) + $(if ($age.TotalHours -gt 1) { ' ' + (& $pill "STALE since $(& $fmt $d.snapshots.$c)" $col.warn $col.warnbg) })
-        $rate = if ($ok + $bad) { "$([math]::Round(100 * $ok / ($ok + $bad)))%" } else { '&mdash;' }
+        $rate = if ($ok + $bad) { "$([math]::Round(100 * $ok / ($ok + $bad), 2))%" } else { '&mdash;' }
         $week = if ($runs) { "<b>$runs</b> runs &middot; <b style=""color:$(if ($bad) { $col.bad } else { $col.ok })"">$bad</b> failed &middot; $can cancelled &middot; $rate success" } else { 'no runs' }
         $rows = if ($hit) { "<div style=""color:$($col.muted);font-size:12px;margin-top:10px"">Flows with failures this week</div><table style=""width:100%;border-collapse:collapse"">$(($hit | ForEach-Object { & $flowRow $_ }) -join '')</table>" } else { '' }
         & $card "$c $pills" "<div style=""color:$($col.muted);font-size:12px"">Last 7 days</div><div>$week</div>$rows"
