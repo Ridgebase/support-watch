@@ -29,7 +29,8 @@ $fmt   = { param($s) if ($s -is [datetime]) { $s.ToString('yyyy-MM-dd HH:mm') } 
 $url   = { param($f) "https://make.powerautomate.com/environments/$($f.EnvironmentId)/flows/$($f.FlowId)/details" }
 $esc   = { param($s) [System.Net.WebUtility]::HtmlEncode("$s") }
 $mails = @()
-if ($Sample) { $open = @{}; foreach ($f in $d.flows) { $f | Add-Member LastFailed '' -Force }; foreach ($g in $d.flows | Where-Object { $_.Runs -gt 0 } | Group-Object Client) { $g.Group[0].LastStatus = 'Failed'; $g.Group[0].Failed = 1; $g.Group[0].LastFailed = $g.Group[0].Last } }   # only the marked flow per client, not the week's real failures
+if ($Sample) { $open = @{}; foreach ($f in $d.flows) { $f | Add-Member LastFailed '' -Force }; foreach ($g in $d.flows | Where-Object { $_.Runs -gt 0 } | Group-Object Client) { $g.Group[0].LastStatus = 'Failed'; $g.Group[0].Failed = 1; $g.Group[0].LastFailed = $g.Group[0].Last }
+               foreach ($g in $d.powerbi | Where-Object Start | Sort-Object Start -Descending | Group-Object Client) { $g.Group[0].Status = 'Failed' } }   # only the marked flow / model per client, not the week's real failures
 
 # HTML with inline styles (mail clients drop stylesheets), same palette as the page. One card per client.
 $col = @{ bg = '#f8f7f5'; fg = '#262e3a'; muted = '#76706a'; line = '#e4ded7'; ok = '#3c8274'; bad = '#e95664'; warn = '#c2641a'; badbg = '#fdecee'; okbg = '#e9f3ee'; warnbg = '#fdf1e6' }
@@ -56,7 +57,7 @@ $open    = @{}; foreach ($f in $failed) { $open[(& $key $f)] = & $iso $f.LastFai
 # A failure older than 7 days is never news (an abandoned sandbox would otherwise alert at the first run after a state reset).
 $weekAgo   = $now.AddDays(-7).ToString('s')
 $pbiFailed = @($d.powerbi | Where-Object { $_.Status -eq 'Failed' -and $_.Start -and (& $iso $_.Start) -gt $weekAgo })
-$pbiNew    = @(if (-not ($Sample -or $SampleDigest)) { $pbiFailed | Where-Object { $k = "$($_.Client)|pbi|$($_.ModelId)"; -not $open.ContainsKey($k) -or (& $iso $_.Start) -gt (& $iso $open[$k]) } })   # @() outside the if: a one-element result would otherwise unwrap
+$pbiNew    = @(if (-not $SampleDigest) { $pbiFailed | Where-Object { $k = "$($_.Client)|pbi|$($_.ModelId)"; -not $open.ContainsKey($k) -or (& $iso $_.Start) -gt (& $iso $open[$k]) } })   # @() outside the if: a one-element result would otherwise unwrap
 foreach ($r in $pbiFailed) { $open["$($r.Client)|pbi|$($r.ModelId)"] = & $iso $r.Start }
 $pbiRow = { param($r) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>$(& $esc $r.Model)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $r.Workspace) &middot; refresh failed $(& $fmt $r.Start) &middot; $(& $esc $r.Type)</span>" +
                         "<div style=""margin-top:6px;font:11px/1.4 Consolas,Menlo,monospace;color:$($col.muted);word-break:break-all"">$($r.Url)</div></td>" +
@@ -65,7 +66,7 @@ if ($pbiNew) {
     $cards = foreach ($g in $pbiNew | Group-Object Client) {
         & $card "$($g.Name) $(& $pill "$($g.Count) refresh failed" $col.bad $col.badbg)" "<table style=""width:100%;border-collapse:collapse"">$(($g.Group | ForEach-Object { & $pbiRow $_ }) -join '')</table>"
     }
-    $mails += @{ subject = "[Support Watch] Power BI: $(($pbiNew | Group-Object Client | ForEach-Object { "$($_.Name): $($_.Count) refresh failed" }) -join ', ')"
+    $mails += @{ subject = "$(if ($Sample) { '[Sample] ' })[Support Watch] Power BI: $(($pbiNew | Group-Object Client | ForEach-Object { "$($_.Name): $($_.Count) refresh failed" }) -join ', ')"
                  body    = & $wrap 'Open the model settings, then Refresh history, to read the error' "$($pbiNew.Count) Power BI refresh$(if ($pbiNew.Count -gt 1) { 'es' }) failed" ($cards -join '') }
 }
 
