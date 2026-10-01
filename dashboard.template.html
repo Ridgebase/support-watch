@@ -37,6 +37,11 @@
   .switch input:checked + span { background:var(--blue); }
   .switch input:checked + span::after { left:18px; }
   .switch input:focus-visible + span { outline:2px solid var(--accent); outline-offset:1px; }
+  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin:0 0 18px; }
+  .tabs button { font:inherit; font-size:14px; color:var(--muted); background:none; border:0; border-bottom:2px solid transparent; margin-bottom:-1px; padding:8px 14px; cursor:pointer; }
+  .tabs button:hover { color:var(--fg); }
+  .tabs button.active { color:var(--fg); border-bottom-color:var(--accent); font-weight:600; }
+  .tabs .badge { display:inline-block; min-width:18px; padding:0 5px; margin-left:6px; border-radius:9px; background:var(--bad); color:#fff; font-size:11px; font-weight:600; line-height:18px; text-align:center; }
   .health { display:flex; align-items:center; gap:24px; padding:16px; margin-bottom:20px; flex-wrap:wrap; }
   .health .status { text-align:center; min-width:80px; }
   .dot { width:16px; height:16px; border-radius:50%; display:inline-block; }
@@ -80,6 +85,7 @@
   <label><span class="switch"><input type="checkbox" id="problems"><span></span></span>Problems only</label>
   <label><span class="switch"><input type="checkbox" id="hidequiet" checked><span></span></span>Hide flows with 0 runs</label>
 </div>
+<div class="tabs" role="tablist"><button class="active" data-tab="pa" role="tab">Power Automate</button><button data-tab="bi" role="tab">Power BI</button></div>
 <div id="out"></div>
 <script>
 // Pre-aggregated by build-dashboard.ps1: { snapshots: {client: collectedAt}, flows: [per flow], days: [per client per day], fails: [failed runs] }
@@ -146,7 +152,7 @@ function health(client) {
 
 function render() {
   const only = document.getElementById('problems').checked, hideQuiet = document.getElementById('hidequiet').checked, client = sel.value;
-  let h = health(client);
+  let h = '';
 
   // Power BI: last refresh per semantic model. Unknown = refresh in progress; Disabled = schedule switched off.
   // A model not refreshed for a week is muted whatever its status: an abandoned sandbox is not an incident.
@@ -155,12 +161,22 @@ function render() {
   const dur = r => r.Start && r.End ? Math.max(1, Math.round((new Date(r.End) - new Date(r.Start)) / 60e3)) + ' min' : '—';
   const pbi = (data.powerbi || []).filter(r => (!client || r.Client === client) && (!only || ['bad', 'warn'].includes(pbiCls(r))))
     .sort((a, b) => a.Client.localeCompare(b.Client) || a.Workspace.localeCompare(b.Workspace) || a.Model.localeCompare(b.Model));
-  if (pbi.length) {
+  // Power BI tab: a red badge on the tab counts the models whose recent refresh failed, whatever filter is on.
+  const biBad = (data.powerbi || []).filter(r => (!client || r.Client === client) && pbiCls(r) === 'bad').length;
+  document.querySelector('.tabs [data-tab="bi"]').innerHTML = 'Power BI' + (biBad ? `<span class="badge">${biBad}</span>` : '');
+  if (tab === 'bi') {
+    if (!pbi.length) h += '<p class="muted">No Power BI refresh to show.</p>';
+    else {
     h += `<h2 id="powerbi">Power BI refreshes <span class="muted">(${pbi.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Workspace</th><th>Model</th><th>Last refresh</th><th class="num">Duration</th><th>Type</th><th>Status</th></tr></thead><tbody>`;
     for (const r of pbi) h += `<tr class="${pbiCls(r)}"><td>${esc(r.Client)}</td><td>${esc(r.Workspace)}</td><td class="flow">${esc(r.Model)}${copyBtn(r.Url)}</td><td>${fmt(r.Start)}</td><td class="num">${dur(r)}</td><td>${esc(r.Type)}</td><td class="${statusClass(pbiLabel(r))}">${esc(pbiLabel(r))}</td></tr>`;
     h += '</tbody></table></div>';
+    }
+    document.getElementById('out').innerHTML = h;
+    return;
   }
 
+  // Power Automate tab
+  h += health(client);
   const rank = { bad: 0, warn: 1, ok: 2, '': 3, off: 4 };
   const list = summary.filter(f => (!client || f.client === client) && (!only || problem(f)) && (!hideQuiet || f.runs > 0))
     .sort((a, b) => rank[cls(a)] - rank[cls(b)] || b.failed - a.failed || a.client.localeCompare(b.client) || a.flow.localeCompare(b.flow));
@@ -191,12 +207,19 @@ document.getElementById('out').addEventListener('click', e => {
   const b = e.target.closest('button.copy'); if (!b) return;
   navigator.clipboard.writeText(b.dataset.url).then(() => { b.textContent = '✓'; setTimeout(() => b.innerHTML = COPY_SVG, 1200); });
 });
+let tab = location.hash === '#bi' ? 'bi' : 'pa';
+document.querySelector('.tabs').addEventListener('click', e => {
+  const b = e.target.closest('button[data-tab]'); if (!b) return;
+  tab = b.dataset.tab; document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('active', x === b));
+  history.replaceState(null, '', tab === 'bi' ? '#bi' : location.pathname + location.search); render();
+});
+if (tab === 'bi') document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('active', x.dataset.tab === 'bi'));
 document.getElementById('problems').onchange = render;
 document.getElementById('hidequiet').onchange = render;
 sel.onchange = render;
 render();
 // Reload every 10 min with a fresh query string so the CDN cache (max-age 600 on GitHub Pages) is bypassed.
-setTimeout(() => location.replace(location.pathname + '?r=' + Date.now()), 600e3);
+setTimeout(() => location.replace(location.pathname + '?r=' + Date.now() + (tab === 'bi' ? '#bi' : '')), 600e3);
 </script>
 </body>
 </html>
