@@ -27,7 +27,8 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   instead of every run) and renders `out/site/index.html` from `dashboard.template.html`.
 - The same run also collects, per client, the last refresh of the Power BI models listed under `PowerBI` in `CLIENTS_JSON`
   (`out/powerbi.csv`, Power BI tab) and, for every listed environment, the canvas apps and connections
-  (`out/powerapps.csv`, `out/connections.csv`, Power Apps tab): a connection whose status is not Connected and an app whose
+  (`out/powerapps.csv`, `out/connections.csv`, Power Apps tab; connections only those owned by the signed-in integration
+  account, other users' personal connections are not ours to watch): a connection whose status is not Connected and an app whose
   owner account is disabled or deleted in Entra are red and counted in the tab's badge. With a Power Platform admin role the
   whole environment is listed; otherwise only what the signed-in account can see.
 - `.github/workflows/watch.yml` runs both every 10 minutes. GitHub throttles its own `schedule` trigger (gaps of ~30 min

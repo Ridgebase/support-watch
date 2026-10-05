@@ -132,6 +132,9 @@ foreach ($c in $clients) {
         $ah   = @{ Authorization = "Bearer $($at.access_token)" }
         $papi = 'https://api.powerapps.com/providers/Microsoft.PowerApps'
         $gt   = try { (Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$($c.Tenant)/oauth2/v2.0/token" -Body @{ grant_type = 'refresh_token'; client_id = $clientId; refresh_token = $rt; scope = 'https://graph.microsoft.com/.default offline_access' }).access_token } catch { $null }
+        # Connections are kept only for the integration account, i.e. the one signed in (its UPN is in the token): those are the
+        # connections the flows and the supported apps run on; other users' personal connections are not ours to watch.
+        $me = try { $cl = $at.access_token.Split('.')[1].Replace('-', '+').Replace('_', '/'); $cl = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($cl.PadRight($cl.Length + (4 - $cl.Length % 4) % 4, '='))) | ConvertFrom-Json; "$($cl.upn ?? $cl.preferred_username ?? $cl.unique_name)" } catch { '' }
         $ownerState = @{}
         $stateOf = { param($upn)
             if (-not $upn) { return 'Unknown' }
@@ -159,6 +162,7 @@ foreach ($c in $clients) {
             $list = try { @(Get-All "$papi/scopes/admin/environments/$envId/connections?$ver" $ah) } catch { @(Get-All "$papi/connections?$ver&`$filter=environment eq '$envId'" $ah) }
             foreach ($k in $list) {
                 $p = $k['properties']; $apiName = ("$($p['apiId'])" -split '/')[-1]; $st = @($p['statuses'])[0]; $by = $p['createdBy']
+                if ($me -and "$($by.email)" -ne $me -and "$($by.userPrincipalName)" -ne $me) { continue }   # string -ne is case-insensitive
                 $conns.Add([pscustomobject]@{ Client = $c.Name; Environment = $envName; EnvironmentId = $envId; Connection = $p['displayName']; Connector = ($apiName -replace '^shared_', '')
                     Owner = "$($by.displayName)"; OwnerEmail = "$($by.email)"; Status = "$($st.status)"; Error = "$($st.error.message)"; Modified = (& $toLocal $p['lastModifiedTime'])
                     Url = "https://make.powerapps.com/environments/$envId/connections/$apiName/$($k['name'])/details" })
