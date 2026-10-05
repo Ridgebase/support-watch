@@ -153,6 +153,7 @@ foreach ($c in $clients) {
             foreach ($a in $list) {
                 # Property access ($x.key) on a missing hashtable is $null; indexing ($x['key']) throws. Owners, statuses and errors can all be missing.
                 $p = $a['properties']; $refs = @($p['connectionReferences'].Values); $o = $p['owner']
+                if ("$($o.displayName)" -eq 'SYSTEM') { continue }   # platform-owned apps (Dataverse sample apps and the like), not the client's
                 $apps.Add([pscustomobject]@{ Client = $c.Name; Environment = $envName; EnvironmentId = $envId; App = $p['displayName']; AppId = $a['name']
                     Owner = "$($o.displayName)"; OwnerEmail = "$($o.email)"; OwnerState = (& $stateOf ($o.userPrincipalName ?? $o.email))
                     Shared = [int]$p['sharedUsersCount'] + [int]$p['sharedGroupsCount']; Connectors = (@($refs | ForEach-Object { $_['displayName'] } | Sort-Object -Unique) -join ', ')
