@@ -60,6 +60,9 @@ foreach ($c in $clients) {
     }
     $h = @{ Authorization = "Bearer $($tok.access_token)" }
 
+    # The environments and flows lists are read without per-flow retries: a 60 s stall there (seen 2026-10-05, it killed the
+    # whole job) makes the client blocked for this run, i.e. carried over from the gist like a failed sign-in, instead of exit 1.
+    try {
     $all   = @(Get-All "$api/environments?$ver" $h)
     $names = @($all | ForEach-Object { $_['properties']['displayName'] })
     $envs  = @($all | Where-Object { $c.Environments -contains $_['properties']['displayName'] })
@@ -99,6 +102,11 @@ foreach ($c in $clients) {
         foreach ($fr in $flowRows) {
             $rows.Add([pscustomobject]@{ Collected = $collected; Client = $c.Name; Environment = $env['properties']['displayName']; EnvironmentId = $env['name']; Flow = $fr.Flow; FlowId = $fr.FlowId; Enabled = $fr.Enabled; Trigger = $fr.Trigger; Start = $fr.Start; Status = $fr.Status })
         }
+    }
+    } catch {
+        $failures += "$($c.Name): flow collection failed: $($_.Exception.Message)"; $blocked += $c.Name
+        $rows.RemoveAll({ param($r) $r.Client -eq $c.Name }) | Out-Null   # a half-collected client would double up with its carry-over
+        continue
     }
     Write-Host "$($c.Name): $($envs.Count) environment(s), $(@($rows | Where-Object Client -eq $c.Name).Count) rows"
 
