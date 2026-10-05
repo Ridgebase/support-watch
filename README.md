@@ -25,6 +25,11 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   configured environments through the Flow REST API, and writes `out/flow-runs.csv`.
 - `build-dashboard.ps1` aggregates that CSV into `out/site/data.json` (per-flow and per-day totals, failed runs; ~40 KB
   instead of every run) and renders `out/site/index.html` from `dashboard.template.html`.
+- The same run also collects, per client, the last refresh of the Power BI models listed under `PowerBI` in `CLIENTS_JSON`
+  (`out/powerbi.csv`, Power BI tab) and, for every listed environment, the canvas apps and connections
+  (`out/powerapps.csv`, `out/connections.csv`, Power Apps tab): a connection whose status is not Connected and an app whose
+  owner account is disabled or deleted in Entra are red and counted in the tab's badge. With a Power Platform admin role the
+  whole environment is listed; otherwise only what the signed-in account can see.
 - `.github/workflows/watch.yml` runs both every 10 minutes. GitHub throttles its own `schedule` trigger (gaps of ~30 min
   were observed), so the 10-minute cadence comes from a free cron-job.org job that POSTs to the workflow's
   `dispatches` API with a fine-grained token (repo `support-watch`, permission Actions read/write, approved by an

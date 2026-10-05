@@ -6,6 +6,8 @@
 param(
     [string]$Csv    = "$PSScriptRoot/../out/flow-runs.csv",
     [string]$PbiCsv = "$PSScriptRoot/../out/powerbi.csv",
+    [string]$AppsCsv = "$PSScriptRoot/../out/powerapps.csv",
+    [string]$ConnCsv = "$PSScriptRoot/../out/connections.csv",
     [string]$OutDir = "$PSScriptRoot/../out/site",
     [string]$Carry  = "$PSScriptRoot/../out/carry.json"
 )
@@ -13,6 +15,8 @@ $rows  = if (Test-Path $Csv) { @(Import-Csv $Csv) } else { @() }
 $isRun = { $_.Status -ne 'NO_RUNS' -and $_.Status -ne 'UNREADABLE' }
 $snapshots = @{}; $flows = @(); $days = @(); $fails = @()
 $powerbi = if (Test-Path $PbiCsv) { @(Import-Csv $PbiCsv) } else { @() }   # last refresh per Power BI semantic model, from collect.ps1
+$apps    = if (Test-Path $AppsCsv) { @(Import-Csv $AppsCsv) } else { @() }   # canvas apps and connections, from collect.ps1
+$conns   = if (Test-Path $ConnCsv) { @(Import-Csv $ConnCsv) } else { @() }
 
 foreach ($g in $rows | Group-Object Client) {
     $snapshots[$g.Name] = ($g.Group | Sort-Object Collected -Descending)[0].Collected
@@ -39,10 +43,11 @@ foreach ($g in $rows | Group-Object Client) {
 if (Test-Path $Carry) {
     $c = Get-Content $Carry -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($p in $c.snapshots.PSObject.Properties) { $snapshots[$p.Name] = $p.Value }
-    $flows += @($c.flows); $days += @($c.days); $fails += @($c.fails); $powerbi += @($c.powerbi)
+    $flows += @($c.flows); $days += @($c.days); $fails += @($c.fails); $powerbi += @($c.powerbi); $apps += @($c.apps); $conns += @($c.connections)
 }
 
-$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi } | ConvertTo-Json -Depth 5 -Compress
+$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi; apps = $apps; connections = $conns } | ConvertTo-Json -Depth 5 -Compress
+$data = $data.Replace('</', '<\/')   # a "</script>" inside any text (a connection error, a flow name) would end the page's data script; "<\/" is the same string in JSON
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $html = (Get-Content "$PSScriptRoot/dashboard.template.html" -Raw -Encoding UTF8).Replace('__DATA__', $data)
 [IO.File]::WriteAllText("$OutDir/index.html", $html, [Text.UTF8Encoding]::new($false))

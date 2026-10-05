@@ -8,6 +8,8 @@
 #                  thousands of runs a week would otherwise take minutes to page through (its 7-day totals then cover only those days)
 #                  optional per client: "PowerBI": ["<workspace name>", ...] also collects the last refresh of every semantic
 #                  model in those workspaces (same refresh token, exchanged for a Power BI API token) into powerbi.csv
+#                  Power Apps needs no option: every listed environment's canvas apps and connections go to powerapps.csv and
+#                  connections.csv (same refresh token exchanged for a Power Apps API token, Graph for the owners' account state)
 #   RT_<NAME>      the client's refresh token (from get-refresh-token.ps1), e.g. RT_SEMO
 #   NETLIFY_TOKEN  used by build-dashboard.ps1
 param([int]$Days = 7, [int]$Parallel = 8)
@@ -29,7 +31,10 @@ $since     = $nowUtc.AddDays(-$Days)
 $out       = Join-Path (Split-Path $PSScriptRoot) 'out'; New-Item -ItemType Directory -Force $out | Out-Null   # everything generated lives in out/
 $rows      = [System.Collections.Generic.List[object]]::new()
 $pbi       = [System.Collections.Generic.List[object]]::new()   # one row per semantic model: its last refresh
+$apps      = [System.Collections.Generic.List[object]]::new()   # one row per canvas app: owner, sharing, connectors
+$conns     = [System.Collections.Generic.List[object]]::new()   # one row per connection: its status (an expired credential is the usual "the app stopped working")
 $failures  = @()
+$toLocal   = { param($s) if ($s) { [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal), $tz).ToString('s') } else { '' } }
 $blocked   = @()   # clients whose sign-in failed this run
 
 # -AsHashtable keeps keys case-sensitive: the Flow API returns keys differing only by case, which the default parser rejects.
@@ -118,6 +123,48 @@ foreach ($c in $clients) {
             Write-Host "$($c.Name): Power BI, $(@($pbi | Where-Object Client -eq $c.Name).Count) model(s) in $($groups.Count) workspace(s)"
         } catch { $failures += "$($c.Name): Power BI collection failed: $($_.Exception.Message)" }
     }
+
+    # Power Apps: canvas apps and connections of the listed environments. The admin scope lists everything in the environment
+    # (needs a Power Platform admin role); otherwise what the signed-in account can see: its own apps and connections.
+    # Owner accounts are looked up in Entra: an app whose owner is disabled or deleted is orphaned (nobody gets its errors, nobody can edit it).
+    try {
+        $at   = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$($c.Tenant)/oauth2/v2.0/token" -Body @{ grant_type = 'refresh_token'; client_id = $clientId; refresh_token = $rt; scope = 'https://service.powerapps.com//.default offline_access' }
+        $ah   = @{ Authorization = "Bearer $($at.access_token)" }
+        $papi = 'https://api.powerapps.com/providers/Microsoft.PowerApps'
+        $gt   = try { (Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$($c.Tenant)/oauth2/v2.0/token" -Body @{ grant_type = 'refresh_token'; client_id = $clientId; refresh_token = $rt; scope = 'https://graph.microsoft.com/.default offline_access' }).access_token } catch { $null }
+        $ownerState = @{}
+        $stateOf = { param($upn)
+            if (-not $upn) { return 'Unknown' }
+            if (-not $ownerState.ContainsKey($upn)) {
+                $ownerState[$upn] = if (-not $gt) { 'Unknown' } else {
+                    try { if ((Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/users/$([uri]::EscapeDataString($upn))?`$select=accountEnabled" -Headers @{ Authorization = "Bearer $gt" }).accountEnabled) { 'Active' } else { 'Disabled' } }
+                    catch { if ($_.Exception.Response.StatusCode -eq 404) { 'Deleted' } else { 'Unknown' } }
+                }
+            }
+            $ownerState[$upn]
+        }
+        $scopeNote = ''
+        foreach ($env in $envs) {
+            $envId = $env['name']; $envName = $env['properties']['displayName']
+            $list = try { @(Get-All "$papi/scopes/admin/environments/$envId/apps?$ver" $ah) } catch { $scopeNote = ' (own apps and connections only: no admin role)'; @(Get-All "$papi/apps?$ver&`$filter=environment eq '$envId'" $ah) }
+            foreach ($a in $list) {
+                $p = $a['properties']; $refs = @($p['connectionReferences'].Values)
+                $apps.Add([pscustomobject]@{ Client = $c.Name; Environment = $envName; EnvironmentId = $envId; App = $p['displayName']; AppId = $a['name']
+                    Owner = "$($p['owner']['displayName'])"; OwnerEmail = "$($p['owner']['email'])"; OwnerState = (& $stateOf ($p['owner']['userPrincipalName'] ?? $p['owner']['email']))
+                    Shared = [int]$p['sharedUsersCount'] + [int]$p['sharedGroupsCount']; Connectors = (@($refs | ForEach-Object { $_['displayName'] } | Sort-Object -Unique) -join ', ')
+                    Premium = [bool]($refs | Where-Object { $_['apiTier'] -eq 'Premium' }); Created = (& $toLocal $p['createdTime']); Modified = (& $toLocal $p['lastModifiedTime']); Published = (& $toLocal $p['appVersion'])
+                    Url = "https://make.powerapps.com/environments/$envId/apps/$($a['name'])/details" })
+            }
+            $list = try { @(Get-All "$papi/scopes/admin/environments/$envId/connections?$ver" $ah) } catch { @(Get-All "$papi/connections?$ver&`$filter=environment eq '$envId'" $ah) }
+            foreach ($k in $list) {
+                $p = $k['properties']; $apiName = ($p['apiId'] -split '/')[-1]; $st = @($p['statuses'])[0]
+                $conns.Add([pscustomobject]@{ Client = $c.Name; Environment = $envName; EnvironmentId = $envId; Connection = $p['displayName']; Connector = ($apiName -replace '^shared_', '')
+                    Owner = "$($p['createdBy']['displayName'])"; OwnerEmail = "$($p['createdBy']['email'])"; Status = "$($st['status'])"; Error = "$($st['error']['message'])"; Modified = (& $toLocal $p['lastModifiedTime'])
+                    Url = "https://make.powerapps.com/environments/$envId/connections/$apiName/$($k['name'])/details" })
+            }
+        }
+        Write-Host "$($c.Name): Power Apps, $(@($apps | Where-Object Client -eq $c.Name).Count) app(s), $(@($conns | Where-Object Client -eq $c.Name).Count) connection(s)$scopeNote"
+    } catch { $failures += "$($c.Name): Power Apps collection failed: $($_.Exception.Message)" }
 }
 
 # Carry-over: a client that could not be signed in from here is taken from CARRY_URL, a data.json that the laptop
@@ -127,11 +174,11 @@ Remove-Item "$out/carry.json" -ErrorAction SilentlyContinue
 if ($blocked -and $env:CARRY_URL) {
     try {
         $c = Invoke-RestMethod -Uri "$($env:CARRY_URL)?t=$(Get-Date -UFormat %s)"   # cache-buster: gist raw URLs are cached ~5 min
-        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @() }
+        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @(); apps = @(); connections = @() }
         foreach ($name in $blocked) {
             if ($c.snapshots.$name) { $carry.snapshots[$name] = $c.snapshots.$name }
             $carry.flows += @($c.flows | Where-Object Client -eq $name); $carry.days += @($c.days | Where-Object Client -eq $name); $carry.fails += @($c.fails | Where-Object Client -eq $name)
-            $carry.powerbi += @($c.powerbi | Where-Object Client -eq $name)
+            $carry.powerbi += @($c.powerbi | Where-Object Client -eq $name); $carry.apps += @($c.apps | Where-Object Client -eq $name); $carry.connections += @($c.connections | Where-Object Client -eq $name)
             Write-Host "$name`: carried over $(@($c.flows | Where-Object Client -eq $name).Count) flows from $($c.snapshots.$name)"
         }
         $carry | ConvertTo-Json -Depth 5 -Compress | Set-Content "$out/carry.json" -Encoding UTF8
@@ -143,6 +190,8 @@ if ($blocked -and $env:CARRY_URL) {
 $collected = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s'); foreach ($r in $rows) { $r.Collected = $collected }
 if ($rows.Count) { $rows | Export-Csv -Path "$out/flow-runs.csv" -NoTypeInformation -Encoding UTF8 }
 if ($pbi.Count)  { $pbi  | Export-Csv -Path "$out/powerbi.csv"   -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/powerbi.csv" -ErrorAction SilentlyContinue }
+if ($apps.Count) { $apps | Export-Csv -Path "$out/powerapps.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/powerapps.csv" -ErrorAction SilentlyContinue }
+if ($conns.Count) { $conns | Export-Csv -Path "$out/connections.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/connections.csv" -ErrorAction SilentlyContinue }
 & "$PSScriptRoot/build-dashboard.ps1"
 $failures | ForEach-Object { Write-Warning $_ }
 # Fail the job (GitHub emails the repo owner) only when nothing at all was collected: the collector itself is broken.
