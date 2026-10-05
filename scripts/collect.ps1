@@ -65,9 +65,11 @@ foreach ($c in $clients) {
     $envs  = @($all | Where-Object { $c.Environments -contains $_['properties']['displayName'] })
     $missing = @($c.Environments | Where-Object { $_ -notin $names })
     if ($missing) { $failures += "$($c.Name): environment(s) not found: $($missing -join ', '). Available: $($names -join ', ')" }
+    Write-Host "$($c.Name): signed in, $($envs.Count) environment(s) found"   # progress marks: a run killed by the function's 10-min limit then shows where it stalled
 
     foreach ($env in $envs) {
         $flows = @(Get-All "$api/environments/$($env['name'])/flows?$ver" $h)
+        Write-Host "$($c.Name): $($env['properties']['displayName']): $($flows.Count) flows listed, reading runs"
         # One runs request per flow, in parallel. Runs come newest first: stop paging once a page ends before the window.
         # The Flow API returns 503/504 timeouts now and then; without retries the flow lost all its runs for that build and showed UNREADABLE.
         $flowRows = $flows | ForEach-Object -ThrottleLimit $Parallel -Parallel {
