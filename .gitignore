@@ -2,3 +2,4 @@
 out/
 # local-only Windows collector (fallback to the Azure Function): holds tenant, environment and Power BI workspace names
 scripts/flow-runs.ps1
+.playwright-mcp/
