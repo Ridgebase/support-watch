@@ -35,9 +35,9 @@ jobs:
         shell: pwsh
         env:
           CLIENTS_JSON: ${{ secrets.CLIENTS_JSON }}
-          RT_SEMO:      ${{ secrets.RT_SEMO }}
           RT_TSMO:      ${{ secrets.RT_TSMO }}
           CARRY_URL:    ${{ secrets.CARRY_URL }}
+          CARRY_CLIENTS: SEMO   # collected by the Azure function only (azure-function/), never from here
         run: ./scripts/collect.ps1
 
       # Azure Static Web Apps (free tier): the site requires a Microsoft sign-in and the invited "reader" role (scripts/staticwebapp.config.json).

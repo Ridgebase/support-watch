@@ -55,6 +55,9 @@ All client-specific values live in GitHub secrets, nothing in this repo:
 | `CLIENTS_JSON`  | `[{"Name":"X","Tenant":"x.com","Environments":["Env display name", ...]}, ...]`            |
 | `RT_<NAME>`     | one per client, the refresh token written by `get-refresh-token.ps1`                       |
 | `CARRY_URL`     | raw URL of the gist where the laptop collector publishes its `data.json` (see below)              |
+
+`CARRY_CLIENTS` (plain env in `watch.yml`, currently `SEMO`) names the clients the job never collects itself: they come
+from `CARRY_URL` only, i.e. from the Azure function, even on the days SEMO's Conditional Access lets GitHub's runners in.
 | `SMTP_USER`     | sending account and From address (a Google Workspace user with an app password)            |
 | `SMTP_PASSWORD` | its app password                                                                           |
 | `MAIL_TO`       | recipient(s), comma-separated                                                              |

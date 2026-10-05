@@ -50,6 +50,10 @@ function Get-All($url, $headers, [scriptblock]$stopWhen) {
 }
 
 foreach ($c in $clients) {
+    # CARRY_CLIENTS: clients never collected from here, only taken from CARRY_URL. SEMO is collected by the Azure function:
+    # its Conditional Access lets GitHub's runners through now and then, and a direct collection from here (slower, no Power BI
+    # since that config lives on the function only) must not replace the function's copy.
+    if ($c.Name -in @($env:CARRY_CLIENTS -split ',' | ForEach-Object Trim)) { $blocked += $c.Name; continue }
     $rt = [Environment]::GetEnvironmentVariable("RT_$($c.Name)")
     if (-not $rt) { $failures += "$($c.Name): no RT_$($c.Name) secret"; $blocked += $c.Name; continue }
     try {
