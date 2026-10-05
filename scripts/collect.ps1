@@ -38,10 +38,11 @@ $toLocal   = { param($s) if ($s) { [TimeZoneInfo]::ConvertTimeFromUtc([datetime]
 $blocked   = @()   # clients whose sign-in failed this run
 
 # -AsHashtable keeps keys case-sensitive: the Flow API returns keys differing only by case, which the default parser rejects.
+# -TimeoutSec: a stalled Flow API connection otherwise hangs the whole run until the function's 10-min kill (seen 2026-10-05); with it the flow comes out UNREADABLE and the rest publishes.
 function Get-All($url, $headers, [scriptblock]$stopWhen) {
     $out = @()
     while ($url) {
-        $r = (Invoke-WebRequest -Uri $url -Headers $headers -MaximumRetryCount 3 -RetryIntervalSec 5).Content | ConvertFrom-Json -AsHashtable
+        $r = (Invoke-WebRequest -Uri $url -Headers $headers -MaximumRetryCount 3 -RetryIntervalSec 5 -TimeoutSec 60).Content | ConvertFrom-Json -AsHashtable
         $out += $r['value']; $url = $r['nextLink']
         if ($stopWhen -and $out.Count -and (& $stopWhen $out[-1])) { break }
     }
@@ -76,7 +77,7 @@ foreach ($c in $clients) {
             $url = "$api/environments/$envId/flows/$($flow['name'])/runs?$ver"; $runs = @(); $status = $null
             try {
                 while ($url) {
-                    $r = (Invoke-WebRequest -Uri $url -Headers $h -MaximumRetryCount 3 -RetryIntervalSec 5).Content | ConvertFrom-Json -AsHashtable
+                    $r = (Invoke-WebRequest -Uri $url -Headers $h -MaximumRetryCount 3 -RetryIntervalSec 5 -TimeoutSec 60).Content | ConvertFrom-Json -AsHashtable
                     $runs += $r['value']; $url = $r['nextLink']
                     if ($runs.Count -and (& $utc $runs[-1]['properties']['startTime']) -lt $since) { break }
                 }
