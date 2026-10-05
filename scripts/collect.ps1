@@ -76,15 +76,20 @@ foreach ($c in $clients) {
             $flow = $_; $api = $using:api; $ver = $using:ver; $h = $using:h; $since = $using:since; $tz = $using:tz; $envId = ($using:env)['name']
             $fd = ($using:c).FlowDays; $fdName = $flow['properties']['displayName']; if ($fd -and $fd.$fdName) { $since = ($using:nowUtc).AddDays(-$fd.$fdName) }
             $utc = { param($s) [datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
-            $url = "$api/environments/$envId/flows/$($flow['name'])/runs?$ver"; $runs = @(); $status = $null
-            try {
-                while ($url) {
-                    $r = (Invoke-WebRequest -Uri $url -Headers $h -MaximumRetryCount 3 -RetryIntervalSec 5 -TimeoutSec 60).Content | ConvertFrom-Json -AsHashtable
-                    $runs += $r['value']; $url = $r['nextLink']
-                    if ($runs.Count -and (& $utc $runs[-1]['properties']['startTime']) -lt $since) { break }
-                }
-                $runs = @($runs | Where-Object { (& $utc $_['properties']['startTime']) -ge $since })
-            } catch { $status = 'UNREADABLE' }
+            $start = "$api/environments/$envId/flows/$($flow['name'])/runs?$ver"; $runs = @(); $status = $null
+            # A timeout throws (-MaximumRetryCount only covers HTTP error codes), so a flow gets a second full attempt before it is UNREADABLE.
+            foreach ($attempt in 1, 2) {
+                $url = $start; $runs = @()
+                try {
+                    while ($url) {
+                        $r = (Invoke-WebRequest -Uri $url -Headers $h -MaximumRetryCount 3 -RetryIntervalSec 5 -TimeoutSec 60).Content | ConvertFrom-Json -AsHashtable
+                        $runs += $r['value']; $url = $r['nextLink']
+                        if ($runs.Count -and (& $utc $runs[-1]['properties']['startTime']) -lt $since) { break }
+                    }
+                    $runs = @($runs | Where-Object { (& $utc $_['properties']['startTime']) -ge $since })
+                    $status = $null; break
+                } catch { $status = 'UNREADABLE' }
+            }
             $tr = try { $t = $flow['properties']['definitionSummary']['triggers'][0]; "$($t['type'])/$($t['kind'])" } catch { '' }
             $base = @{ Flow = $flow['properties']['displayName']; FlowId = $flow['name']; Enabled = ($flow['properties']['state'] -eq 'Started'); Trigger = $tr }
             if ($status)             { [pscustomobject]($base + @{ Start = ''; Status = $status }) }
