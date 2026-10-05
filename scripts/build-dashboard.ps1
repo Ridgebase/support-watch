@@ -11,12 +11,12 @@ param(
     [string]$OutDir = "$PSScriptRoot/../out/site",
     [string]$Carry  = "$PSScriptRoot/../out/carry.json"
 )
-$rows  = if (Test-Path $Csv) { @(Import-Csv $Csv) } else { @() }
+$rows  = @(if (Test-Path $Csv) { @(Import-Csv $Csv) } else { @() })
 $isRun = { $_.Status -ne 'NO_RUNS' -and $_.Status -ne 'UNREADABLE' }
 $snapshots = @{}; $flows = @(); $days = @(); $fails = @()
-$powerbi = if (Test-Path $PbiCsv) { @(Import-Csv $PbiCsv) } else { @() }   # last refresh per Power BI semantic model, from collect.ps1
-$apps    = if (Test-Path $AppsCsv) { @(Import-Csv $AppsCsv) } else { @() }   # canvas apps and connections, from collect.ps1
-$conns   = if (Test-Path $ConnCsv) { @(Import-Csv $ConnCsv) } else { @() }
+$powerbi = @(if (Test-Path $PbiCsv) { @(Import-Csv $PbiCsv) } else { @() })   # last refresh per Power BI semantic model, from collect.ps1
+$apps    = @(if (Test-Path $AppsCsv) { @(Import-Csv $AppsCsv) } else { @() })   # canvas apps and connections, from collect.ps1
+$conns   = @(if (Test-Path $ConnCsv) { @(Import-Csv $ConnCsv) } else { @() })
 
 foreach ($g in $rows | Group-Object Client) {
     $snapshots[$g.Name] = ($g.Group | Sort-Object Collected -Descending)[0].Collected
