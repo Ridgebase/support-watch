@@ -196,13 +196,13 @@ function render() {
   if (tab === 'apps') {
     if (!conns.length && !apps.length) h += '<p class="muted">No Power Apps data to show.</p>';
     if (conns.length) {
-      h += `<h2 id="connections">Connections <span class="muted">(${conns.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Connection</th><th>Connector</th><th>Owner</th><th>Status</th><th>Error</th><th>Last modified</th></tr></thead><tbody>`;
-      for (const k of conns) h += `<tr class="${connCls(k)}"><td>${esc(k.Client)}</td><td>${esc(k.Environment)}</td><td class="flow">${esc(k.Connection)}${copyBtn(k.Url)}</td><td>${esc(k.Connector)}</td><td>${esc(k.Owner)}</td><td class="c-${connCls(k)}">${esc(k.Status || '—')}</td><td class="text">${esc(k.Error || '')}</td><td>${fmt(k.Modified)}</td></tr>`;
+      h += `<h2 id="connections">Connections <span class="muted">(${conns.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Connection</th><th>Connector</th><th>Owner</th><th>Status</th><th>Error</th></tr></thead><tbody>`;
+      for (const k of conns) h += `<tr class="${connCls(k)}"><td>${esc(k.Client)}</td><td>${esc(k.Environment)}</td><td class="flow">${esc(k.Connection)}${copyBtn(k.Url)}</td><td>${esc(k.Connector)}</td><td>${esc(k.Owner)}</td><td class="c-${connCls(k)}">${esc(k.Status || '—')}</td><td class="text">${esc(k.Error || '')}</td></tr>`;
       h += '</tbody></table></div>';
     }
     if (apps.length) {
-      h += `<h2 id="apps">Canvas apps <span class="muted">(${apps.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>App</th><th>Owner</th><th>Owner account</th><th class="num">Shared with</th><th>Connectors</th><th>Premium</th><th>Last modified</th><th>Published</th></tr></thead><tbody>`;
-      for (const a of apps) h += `<tr class="${appCls(a)}"><td>${esc(a.Client)}</td><td>${esc(a.Environment)}</td><td class="flow">${esc(a.App)}${copyBtn(a.Url)}</td><td>${esc(a.Owner)}</td><td class="${appCls(a) ? 'c-bad' : ''}">${esc(a.OwnerState)}</td><td class="num">${a.Shared}</td><td class="text">${esc(a.Connectors)}</td><td>${String(a.Premium).toLowerCase() === 'true' ? 'Yes' : 'No'}</td><td>${fmt(a.Modified)}</td><td>${fmt(a.Published)}</td></tr>`;
+      h += `<h2 id="apps">Canvas apps <span class="muted">(${apps.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>App</th><th>Owner</th><th>Owner account</th><th>Connectors</th><th>Premium</th><th>Last modified</th><th>Published</th></tr></thead><tbody>`;
+      for (const a of apps) h += `<tr class="${appCls(a)}"><td>${esc(a.Client)}</td><td>${esc(a.Environment)}</td><td class="flow">${esc(a.App)}${copyBtn(a.Url)}</td><td>${esc(a.Owner)}</td><td class="${appCls(a) ? 'c-bad' : ''}">${esc(a.OwnerState)}</td><td class="text">${esc(a.Connectors)}</td><td>${String(a.Premium).toLowerCase() === 'true' ? 'Yes' : 'No'}</td><td>${fmt(a.Modified)}</td><td>${fmt(a.Published)}</td></tr>`;
       h += '</tbody></table></div>';
     }
     document.getElementById('out').innerHTML = h;
