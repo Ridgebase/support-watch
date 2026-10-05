@@ -32,7 +32,8 @@
   .controls label[data-for] { display:none; }   /* the second switch depends on the tab */
   body[data-tab="pa"] .controls label[data-for="pa"], body[data-tab="bi"] .controls label[data-for="bi"], body[data-tab="apps"] .controls label[data-for="apps"] { display:inline-flex; }
   td.text { white-space:normal; min-width:160px; max-width:420px; }   /* error messages and connector lists wrap too */
-  body[data-tab="apps"] th, body[data-tab="apps"] td { white-space:normal; }   /* every cell may wrap: the tables then always fit the page width, no sideways scroll */
+  body[data-tab="apps"] th, body[data-tab="apps"] td { white-space:normal; }
+  body[data-tab="apps"] td.date { white-space:nowrap; }   /* a date split over two lines reads badly */   /* every cell may wrap: the tables then always fit the page width, no sideways scroll */
   select { appearance:none; -webkit-appearance:none; font:inherit; color:var(--fg); background:var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' fill='none' stroke='%2376706a' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 10px center / 12px; border:1px solid var(--line); border-radius:6px; padding:6px 30px 6px 10px; min-width:160px; cursor:pointer; }
   select:hover { border-color:var(--muted); }
   select:focus { outline:2px solid var(--accent); outline-offset:1px; }
@@ -198,7 +199,7 @@ function render() {
     if (!conns.length && !apps.length) h += '<p class="muted">No Power Apps data to show.</p>';
     if (apps.length) {
       h += `<h2 id="apps">Canvas apps <span class="muted">(${apps.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>App</th><th>Owner</th><th>Connectors</th><th>Premium</th><th>Last modified</th><th>Published</th></tr></thead><tbody>`;
-      for (const a of apps) h += `<tr class="${appCls(a)}"><td>${esc(a.Client)}</td><td>${esc(a.Environment)}</td><td class="flow">${esc(a.App)}${copyBtn(a.Url)}</td><td>${esc(a.Owner)}${appCls(a) ? ` <b class="c-bad">(account ${esc(a.OwnerState.toLowerCase())})</b>` : ''}</td><td class="text">${esc(a.Connectors)}</td><td>${String(a.Premium).toLowerCase() === 'true' ? 'Yes' : 'No'}</td><td>${fmt(a.Modified)}</td><td>${fmt(a.Published)}</td></tr>`;
+      for (const a of apps) h += `<tr class="${appCls(a)}"><td>${esc(a.Client)}</td><td>${esc(a.Environment)}</td><td class="flow">${esc(a.App)}${copyBtn(a.Url)}</td><td>${esc(a.Owner)}${appCls(a) ? ` <b class="c-bad">(account ${esc(a.OwnerState.toLowerCase())})</b>` : ''}</td><td class="text">${esc(a.Connectors)}</td><td>${String(a.Premium).toLowerCase() === 'true' ? 'Yes' : 'No'}</td><td class="date">${fmt(a.Modified)}</td><td class="date">${fmt(a.Published)}</td></tr>`;
       h += '</tbody></table></div>';
     }
     if (conns.length) {
