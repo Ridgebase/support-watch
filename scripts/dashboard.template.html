@@ -111,7 +111,7 @@ const COPY_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentC
 const copyBtn = url => url ? `<button class="copy" data-url="${esc(url)}" title="Copy the URL">${COPY_SVG}</button>` : '';
 const fmt = iso => iso ? iso.replace('T', ' ').slice(0, 16) : '—';
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '—';
+const pct = (a, b) => b ? (100 * a / b).toFixed(2).replace(/\.?0+$/, '') + '%' : '—';   // 99.79%, 100% (no trailing zeros)
 const statusClass = s => s === 'Succeeded' ? 'c-ok' : s === 'Failed' ? 'c-bad' : s === 'Running' ? 'c-grey' : 'c-warn';
 const localDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;   // Start values are local time, so days must be too
 
