@@ -40,7 +40,7 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
 **Known limit:** Seguin Morris (SEMO) has a Conditional Access policy that blocks sign-ins from outside Canada, so
 GitHub's US runners are refused (AADSTS53003). SEMO is therefore collected by `azure-function/`, a PowerShell timer
 function in **Canada Central** (Ridgebase subscription, resource group `rg-support-watch`, app `func-support-watch-semo`),
-every 10 minutes: it fetches `collect.ps1`, `build-dashboard.ps1` and the template from this repo's `main` at each run
+every 15 minutes (10 overloaded the Flow API): it fetches `collect.ps1`, `build-dashboard.ps1` and the template from this repo's `main` at each run
 (no redeploy for script changes), collects SEMO, and publishes `site/data.json` to an unlisted gist; the cloud job
 reads that gist for any client it cannot sign in to. Its settings: `CLIENTS_JSON_B64` (CLIENTS_JSON base64-encoded, SEMO only, with `FlowDays` and
 `PowerBI`), `RT_SEMO`, `GIST_ID`, `GIST_TOKEN`; `azure-function/set-secrets.ps1` copies the secret ones from the PC that

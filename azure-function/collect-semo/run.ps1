@@ -1,4 +1,4 @@
-# Azure Function (PowerShell 7, Canada Central), every 10 minutes: collects SEMO from a Canadian IP, which its
+# Azure Function (PowerShell 7, Canada Central), every 15 minutes (was 10: eases the Flow API, which slowed down under the load on 2026-10-05): collects SEMO from a Canadian IP, which its
 # Conditional Access allows while GitHub's US runners are refused, and publishes data.json to the gist the cloud job
 # reads. It is the laptop collector (flow-runs.ps1) without the laptop.
 # The scripts are fetched from the public repo's main branch at each run, so a change there needs no redeploy here.
