@@ -52,7 +52,9 @@ $failed  = @($d.flows | Where-Object { $_.LastFailed -and "$($_.Enabled)".ToLowe
 $key     = { param($f) "$($f.Client)|$($f.FlowId)" }
 $iso     = { param($s) if ($s -is [datetime]) { $s.ToString('s') } else { "$s" } }   # pwsh 7 parses JSON dates into [datetime]; compare as ISO strings on both engines
 $new     = @($failed | Where-Object { $k = & $key $_; -not $open.ContainsKey($k) -or (& $iso $_.LastFailed) -gt (& $iso $open[$k]) })
-$open    = @{}; foreach ($f in $failed) { $open[(& $key $f)] = & $iso $f.LastFailed }   # flows whose failures left the 7-day window drop out silently
+$prev = $open; $open = @{}; foreach ($f in $failed) { $open[(& $key $f)] = & $iso $f.LastFailed }   # flows whose failures left the 7-day window drop out silently
+# An UNREADABLE flow's runs are unknown for this snapshot, not clean: keep what was announced for it, or its old failure is re-announced once the flow is readable again (happened 2026-10-05).
+foreach ($f in @($d.flows | Where-Object LastStatus -eq 'UNREADABLE')) { $k = & $key $f; if ($prev.ContainsKey($k)) { $open[$k] = $prev[$k] } }
 # Power BI: a semantic model whose last refresh failed within the window and was not announced yet (same rule, own key).
 # A failure older than 7 days is never news (an abandoned sandbox would otherwise alert at the first run after a state reset).
 $weekAgo   = $now.AddDays(-7).ToString('s')
