@@ -152,7 +152,7 @@ foreach ($c in $clients) {
             $list = try { @(Get-All "$papi/scopes/admin/environments/$envId/apps?$ver" $ah) } catch { $scopeNote = ' (own apps and connections only: no admin role)'; @(Get-All "$papi/apps?$ver&`$filter=environment eq '$envId'" $ah) }
             foreach ($a in $list) {
                 # Property access ($x.key) on a missing hashtable is $null; indexing ($x['key']) throws. Owners, statuses and errors can all be missing.
-                $p = $a['properties']; $refs = @($p['connectionReferences'].Values); $o = $p['owner']
+                $p = $a['properties']; $refs = @(if ($p['connectionReferences']) { $p['connectionReferences'].Values }); $o = $p['owner']   # @($null.Values) would be @($null), and $null['x'] throws
                 if ("$($o.displayName)" -eq 'SYSTEM') { continue }   # platform-owned apps (Dataverse sample apps and the like), not the client's
                 $apps.Add([pscustomobject]@{ Client = $c.Name; Environment = $envName; EnvironmentId = $envId; App = $p['displayName']; AppId = $a['name']
                     Owner = "$($o.displayName)"; OwnerEmail = "$($o.email)"; OwnerState = (& $stateOf ($o.userPrincipalName ?? $o.email))
