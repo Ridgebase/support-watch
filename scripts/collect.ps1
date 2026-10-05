@@ -148,18 +148,19 @@ foreach ($c in $clients) {
             $envId = $env['name']; $envName = $env['properties']['displayName']
             $list = try { @(Get-All "$papi/scopes/admin/environments/$envId/apps?$ver" $ah) } catch { $scopeNote = ' (own apps and connections only: no admin role)'; @(Get-All "$papi/apps?$ver&`$filter=environment eq '$envId'" $ah) }
             foreach ($a in $list) {
-                $p = $a['properties']; $refs = @($p['connectionReferences'].Values)
+                # Property access ($x.key) on a missing hashtable is $null; indexing ($x['key']) throws. Owners, statuses and errors can all be missing.
+                $p = $a['properties']; $refs = @($p['connectionReferences'].Values); $o = $p['owner']
                 $apps.Add([pscustomobject]@{ Client = $c.Name; Environment = $envName; EnvironmentId = $envId; App = $p['displayName']; AppId = $a['name']
-                    Owner = "$($p['owner']['displayName'])"; OwnerEmail = "$($p['owner']['email'])"; OwnerState = (& $stateOf ($p['owner']['userPrincipalName'] ?? $p['owner']['email']))
+                    Owner = "$($o.displayName)"; OwnerEmail = "$($o.email)"; OwnerState = (& $stateOf ($o.userPrincipalName ?? $o.email))
                     Shared = [int]$p['sharedUsersCount'] + [int]$p['sharedGroupsCount']; Connectors = (@($refs | ForEach-Object { $_['displayName'] } | Sort-Object -Unique) -join ', ')
                     Premium = [bool]($refs | Where-Object { $_['apiTier'] -eq 'Premium' }); Created = (& $toLocal $p['createdTime']); Modified = (& $toLocal $p['lastModifiedTime']); Published = (& $toLocal $p['appVersion'])
                     Url = "https://make.powerapps.com/environments/$envId/apps/$($a['name'])/details" })
             }
             $list = try { @(Get-All "$papi/scopes/admin/environments/$envId/connections?$ver" $ah) } catch { @(Get-All "$papi/connections?$ver&`$filter=environment eq '$envId'" $ah) }
             foreach ($k in $list) {
-                $p = $k['properties']; $apiName = ($p['apiId'] -split '/')[-1]; $st = @($p['statuses'])[0]
+                $p = $k['properties']; $apiName = ("$($p['apiId'])" -split '/')[-1]; $st = @($p['statuses'])[0]; $by = $p['createdBy']
                 $conns.Add([pscustomobject]@{ Client = $c.Name; Environment = $envName; EnvironmentId = $envId; Connection = $p['displayName']; Connector = ($apiName -replace '^shared_', '')
-                    Owner = "$($p['createdBy']['displayName'])"; OwnerEmail = "$($p['createdBy']['email'])"; Status = "$($st['status'])"; Error = "$($st['error']['message'])"; Modified = (& $toLocal $p['lastModifiedTime'])
+                    Owner = "$($by.displayName)"; OwnerEmail = "$($by.email)"; Status = "$($st.status)"; Error = "$($st.error.message)"; Modified = (& $toLocal $p['lastModifiedTime'])
                     Url = "https://make.powerapps.com/environments/$envId/connections/$apiName/$($k['name'])/details" })
             }
         }
