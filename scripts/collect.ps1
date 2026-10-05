@@ -153,7 +153,9 @@ foreach ($c in $clients) {
             foreach ($a in $list) {
                 # Property access ($x.key) on a missing hashtable is $null; indexing ($x['key']) throws. Owners, statuses and errors can all be missing.
                 $p = $a['properties']; $refs = @(if ($p['connectionReferences']) { $p['connectionReferences'].Values }); $o = $p['owner']   # @($null.Values) would be @($null), and $null['x'] throws
-                if ("$($o.displayName)" -eq 'SYSTEM') { continue }   # platform-owned apps (Dataverse sample apps and the like), not the client's
+                # Skipped: platform-owned apps (owner SYSTEM: Dataverse sample apps and the like) and apps owned by the client's former
+                # integrator (Createch), which are not supported here. -match is case-insensitive.
+                if ("$($o.displayName)" -eq 'SYSTEM' -or "$($o.displayName) $($o.email) $($o.userPrincipalName)" -match 'createch') { continue }
                 $apps.Add([pscustomobject]@{ Client = $c.Name; Environment = $envName; EnvironmentId = $envId; App = $p['displayName']; AppId = $a['name']
                     Owner = "$($o.displayName)"; OwnerEmail = "$($o.email)"; OwnerState = (& $stateOf ($o.userPrincipalName ?? $o.email))
                     Shared = [int]$p['sharedUsersCount'] + [int]$p['sharedGroupsCount']; Connectors = (@($refs | ForEach-Object { $_['displayName'] } | Sort-Object -Unique) -join ', ')
