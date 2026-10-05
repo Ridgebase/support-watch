@@ -131,9 +131,9 @@ function health(client) {
   const todayRows = dayRows.filter(d => d.Day === today);
   const tOk = sum(todayRows, 'Succeeded'), tBad = sum(todayRows, 'Failed');
   const total7 = sum(dayRows, 'Runs'), failed7 = sum(dayRows, 'Failed');
-  // Status follows today, like Koena's: Critical = a flow is failing right now (its latest run failed, whatever the day);
-  // Degraded = failures today but recovered; Healthy = clean today. Earlier-in-the-week failures stay visible as yellow rows only.
-  const [label, tone] = stale ? ['Stale data', 'grey'] : red ? ['Critical', 'bad'] : tBad ? ['Degraded', 'warn'] : total7 ? ['Healthy', 'ok'] : ['Waiting', 'grey'];
+  // Status follows today, like Koena's, but worded by what it means: red = N flows failing right now (latest run failed, whatever
+  // the day); yellow = failures today but recovered; green = clean today. Earlier-in-the-week failures stay visible as yellow rows only.
+  const [label, tone] = stale ? ['Stale data', 'grey'] : red ? [`${red} flow${red > 1 ? 's' : ''} failing`, 'bad'] : tBad ? ['Recovered today', 'warn'] : total7 ? ['All flows OK', 'ok'] : ['Waiting', 'grey'];
   // Last run per client: the flow with the most recent start in that client's snapshot.
   const lastPer = clients.map(c => fl.filter(f => f.client === c && f.runs > 0).sort((a, b) => b.last.localeCompare(a.last))[0]).filter(Boolean);
   let h = `<div class="card health">
