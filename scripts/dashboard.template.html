@@ -119,13 +119,15 @@ const statusClass = s => s === 'Succeeded' ? 'c-ok' : s === 'Failed' ? 'c-bad' :
 const localDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;   // Start values are local time, so days must be too
 
 const sel = document.getElementById('client');
-for (const c of Object.keys(latest).sort()) sel.append(new Option(c, c));
+// Clients, then the helpdesk customers that matched no client (see collect.ps1): picking one filters the Helpdesk tab by customer.
+const unmapped = [...new Set((data.tickets || []).filter(t => !t.Client).map(t => t.Customer).filter(Boolean))].sort();
+for (const c of [...Object.keys(latest).sort(), ...unmapped]) sel.append(new Option(c, c));
 const snaps = [...Object.entries(latest), ...(data.helpdesk ? [['Helpdesk', data.helpdesk]] : [])];
-// "Snapshot: SEMO 14:03 · TSMO 14:05 · Helpdesk 14:03": the time alone when it is today's, the date too otherwise.
+// "Last update: SEMO 14:03 · TSMO 14:05 · Helpdesk 14:03": the time alone when it is today's, the date too otherwise.
 // STALE = the scheduled task has not run for an hour: the page is old, not the flows.
 const hm = iso => iso.slice(0, 10) === localDate(new Date()) ? iso.slice(11, 16) : fmt(iso);
 document.getElementById('meta').innerHTML = snaps.length
-  ? 'Snapshot: ' + snaps.map(([c, t]) => `${esc(c)} <b>${hm(t)}</b>` + (Date.now() - new Date(t) > STALE_MS ? ' <b class="c-bad">STALE</b>' : '')).join(' · ')
+  ? 'Last update: ' + snaps.map(([c, t]) => `${esc(c)} <b>${hm(t)}</b>` + (Date.now() - new Date(t) > STALE_MS ? ' <b class="c-bad">STALE</b>' : '')).join(' · ')
   : 'No data yet. Run flow-runs.ps1 first.';
 
 function health(client) {
@@ -250,7 +252,7 @@ function render() {
   // customer matched no client (see collect.ps1) has Client = '' and shows under All clients only.
   const late = t => !!t.Deadline && new Date(t.Deadline) < Date.now();
   const PRIO = { Low: 0, Medium: 1, High: 2, Urgent: 3 };
-  const tkAll = (data.tickets || []).filter(t => !client || t.Client === client), tkLate = tkAll.filter(late).length;
+  const tkAll = (data.tickets || []).filter(t => !client || t.Client === client || t.Customer === client), tkLate = tkAll.filter(late).length;
   document.querySelector('.tabs [data-tab="help"]').innerHTML = 'Helpdesk' + (tkLate ? `<span class="badge">${tkLate}</span>` : '');
   if (tab === 'help') {
     // Status card in the other tabs' shape. No per-day table: the collector reads the tickets' current state, not their history.
@@ -267,7 +269,7 @@ function render() {
       <div class="stat"><div class="big">${oldest}</div><small>Oldest ticket, days</small></div>
     </div>`;
     const tk = tkAll.filter(t => !only || late(t)).sort((a, b) => late(b) - late(a) || (PRIO[b.Priority] ?? 0) - (PRIO[a.Priority] ?? 0) || a.Created.localeCompare(b.Created));
-    if (!data.helpdesk) h += '<p class="muted">Helpdesk not collected in this snapshot (see the job log).</p>';
+    if (!data.helpdesk) h += '<p class="muted">Helpdesk not collected in the last update (see the job log).</p>';
     else if (!tk.length) h += '<p class="muted">No ticket in progress.</p>';
     else {
       h += `<h2 id="tickets">Tickets in progress <span class="muted">(${tk.length})</span></h2><div class="card wrap"><table><thead><tr><th>Customer</th><th>Ticket</th><th>Priority</th><th>Assigned to</th><th>Created</th><th>Last update</th><th>SLA deadline</th></tr></thead><tbody>`;
