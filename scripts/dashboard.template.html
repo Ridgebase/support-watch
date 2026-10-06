@@ -253,6 +253,19 @@ function render() {
   const tkAll = (data.tickets || []).filter(t => !client || t.Client === client), tkLate = tkAll.filter(late).length;
   document.querySelector('.tabs [data-tab="help"]').innerHTML = 'Helpdesk' + (tkLate ? `<span class="badge">${tkLate}</span>` : '');
   if (tab === 'help') {
+    // Status card in the other tabs' shape. No per-day table: the collector reads the tickets' current state, not their history.
+    const hot = tkAll.filter(t => (PRIO[t.Priority] ?? 0) >= 2).length, unassigned = tkAll.filter(t => !t.Assignee).length;
+    const oldest = tkAll.length ? Math.floor((Date.now() - Math.min(...tkAll.map(t => new Date(t.Created)))) / 864e5) : 0;
+    const [label, tone] = !data.helpdesk ? ['Not collected', 'grey'] : Date.now() - new Date(data.helpdesk) > STALE_MS ? ['Stale data', 'grey']
+      : tkLate ? [`${tkLate} ticket${tkLate > 1 ? 's' : ''} past SLA`, 'bad'] : tkAll.length ? ['All within SLA', 'ok'] : ['No ticket in progress', 'ok'];
+    h += `<div class="card health">
+      <div class="status"><span class="dot" style="background:var(--${tone})"></span><b class="c-${tone}">${label}</b></div>
+      <div class="kpi"><a href="#tickets" class="big" style="color:inherit;text-decoration:none">${tkAll.length}</a><small>Tickets in progress</small></div>
+      <div class="stat ${tkLate ? 'c-bad' : ''}"><a href="#tickets" class="big">${tkLate}</a><small>Past SLA deadline</small></div>
+      <div class="stat ${hot ? 'c-warn' : ''}"><div class="big">${hot}</div><small>Urgent or high</small></div>
+      <div class="stat ${unassigned ? 'c-warn' : ''}"><div class="big">${unassigned}</div><small>Unassigned</small></div>
+      <div class="stat"><div class="big">${oldest}</div><small>Oldest ticket, days</small></div>
+    </div>`;
     const tk = tkAll.filter(t => !only || late(t)).sort((a, b) => late(b) - late(a) || (PRIO[b.Priority] ?? 0) - (PRIO[a.Priority] ?? 0) || a.Created.localeCompare(b.Created));
     if (!data.helpdesk) h += '<p class="muted">Helpdesk not collected in this snapshot (see the job log).</p>';
     else if (!tk.length) h += '<p class="muted">No ticket in progress.</p>';
