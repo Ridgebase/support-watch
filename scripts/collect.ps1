@@ -208,7 +208,7 @@ foreach ($c in $clients) {
 # (ODOO_URL, ODOO_USER, ODOO_KEY: a user API key, which works with 2FA; the database name is the host's first label, Odoo Online's rule).
 # A ticket's client: the CLIENTS_JSON entry whose optional "Odoo" field equals the customer's company in Odoo, else the one whose tenant's
 # first label is contained in that company name (seguinmorris.com ~ "Séguin Morris Inc") or whose Name appears in it as a word ("... (TSMO)"). Unmatched tickets keep Client = '' (shown under All clients).
-$tickets = [System.Collections.Generic.List[object]]::new()
+$tickets = [System.Collections.Generic.List[object]]::new(); $helpdeskAt = ''   # snapshot time of the ticket list (its own line in the page header); '' = not collected this run
 if ($env:ODOO_URL -and $env:ODOO_KEY) {
     try {
         $ou = $env:ODOO_URL.TrimEnd('/'); $odb = ([uri]$ou).Host.Split('.')[0]
@@ -232,6 +232,7 @@ if ($env:ODOO_URL -and $env:ODOO_KEY) {
                 Priority = "$($prio["$($t.priority)"])"; Assignee = (& $m2o $t.user_id); Created = (& $odt $t.create_date); Updated = (& $odt $t.write_date); Deadline = (& $odt $t.sla_deadline)
                 Url = "$ou/odoo/helpdesk/$($t.id)" })
         }
+        $helpdeskAt = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s')
         Write-Host "Helpdesk: $($tickets.Count) ticket(s) in progress"
     } catch { $failures += "Helpdesk collection failed: $($_.Exception.Message)" }
 }
@@ -262,7 +263,7 @@ if ($pbiRuns.Count) { $pbiRuns | Export-Csv -Path "$out/powerbi-runs.csv" -NoTyp
 if ($apps.Count) { $apps | Export-Csv -Path "$out/powerapps.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/powerapps.csv" -ErrorAction SilentlyContinue }
 if ($conns.Count) { $conns | Export-Csv -Path "$out/connections.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/connections.csv" -ErrorAction SilentlyContinue }
 if ($tickets.Count) { $tickets | Export-Csv -Path "$out/tickets.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/tickets.csv" -ErrorAction SilentlyContinue }
-& "$PSScriptRoot/build-dashboard.ps1"
+& "$PSScriptRoot/build-dashboard.ps1" -HelpdeskAt $helpdeskAt
 $failures | ForEach-Object { Write-Warning $_ }
 # Fail the job (GitHub emails the repo owner) only when nothing at all was collected: the collector itself is broken.
 if ($blocked.Count -eq @($clients).Count) { exit 1 }

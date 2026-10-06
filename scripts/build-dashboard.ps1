@@ -10,6 +10,7 @@ param(
     [string]$AppsCsv = "$PSScriptRoot/../out/powerapps.csv",
     [string]$ConnCsv = "$PSScriptRoot/../out/connections.csv",
     [string]$TicketsCsv = "$PSScriptRoot/../out/tickets.csv",
+    [string]$HelpdeskAt = '',   # when collect.ps1 read the Odoo tickets; '' = not collected
     [string]$OutDir = "$PSScriptRoot/../out/site",
     [string]$Carry  = "$PSScriptRoot/../out/carry.json"
 )
@@ -64,7 +65,7 @@ if (Test-Path $Carry) {
     $flows += @($c.flows); $days += @($c.days); $fails += @($c.fails); $powerbi += @($c.powerbi); $pbidays += @($c.pbidays); $apps += @($c.apps); $conns += @($c.connections)
 }
 
-$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi; pbidays = $pbidays; apps = $apps; connections = $conns; tickets = $tickets } | ConvertTo-Json -Depth 5 -Compress
+$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi; pbidays = $pbidays; apps = $apps; connections = $conns; tickets = $tickets; helpdesk = $HelpdeskAt } | ConvertTo-Json -Depth 5 -Compress
 $data = $data.Replace('</', '<\/')   # a "</script>" inside any text (a connection error, a flow name) would end the page's data script; "<\/" is the same string in JSON
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $html = (Get-Content "$PSScriptRoot/dashboard.template.html" -Raw -Encoding UTF8).Replace('__DATA__', $data)

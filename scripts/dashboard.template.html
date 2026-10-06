@@ -122,7 +122,7 @@ const sel = document.getElementById('client');
 for (const c of Object.keys(latest).sort()) sel.append(new Option(c, c));
 document.getElementById('meta').innerHTML =
   // STALE = the scheduled task has not run for an hour: the page is old, not the flows.
-  Object.entries(latest).map(([c, t]) => `${esc(c)}: snapshot ${fmt(t)}` + (Date.now() - new Date(t) > STALE_MS ? ' <b class="c-bad">STALE</b>' : '')).join(' · ') || 'No data yet. Run flow-runs.ps1 first.';
+  [...Object.entries(latest), ...(data.helpdesk ? [['Helpdesk', data.helpdesk]] : [])].map(([c, t]) => `${esc(c)}: snapshot ${fmt(t)}` + (Date.now() - new Date(t) > STALE_MS ? ' <b class="c-bad">STALE</b>' : '')).join(' · ') || 'No data yet. Run flow-runs.ps1 first.';
 
 function health(client) {
   const fl = summary.filter(f => !client || f.client === client);
@@ -242,7 +242,8 @@ function render() {
   document.querySelector('.tabs [data-tab="help"]').innerHTML = 'Helpdesk' + (tkLate ? `<span class="badge">${tkLate}</span>` : '');
   if (tab === 'help') {
     const tk = tkAll.filter(t => !only || late(t)).sort((a, b) => late(b) - late(a) || (PRIO[b.Priority] ?? 0) - (PRIO[a.Priority] ?? 0) || a.Created.localeCompare(b.Created));
-    if (!tk.length) h += '<p class="muted">No ticket in progress.</p>';
+    if (!data.helpdesk) h += '<p class="muted">Helpdesk not collected in this snapshot (see the job log).</p>';
+    else if (!tk.length) h += '<p class="muted">No ticket in progress.</p>';
     else {
       h += `<h2 id="tickets">Tickets in progress <span class="muted">(${tk.length})</span></h2><div class="card wrap"><table><thead><tr><th>Customer</th><th>Ticket</th><th>Priority</th><th>Assigned to</th><th>Created</th><th>Last update</th><th>SLA deadline</th></tr></thead><tbody>`;
       for (const t of tk) h += `<tr class="${late(t) ? 'bad' : ''}"><td>${esc(t.Customer || '—')}</td><td class="flow">#${esc(t.Ref)} ${esc(t.Ticket)}${copyBtn(t.Url)}</td><td class="${t.Priority === 'Urgent' ? 'c-bad' : t.Priority === 'High' ? 'c-warn' : ''}">${esc(t.Priority || '—')}</td><td>${esc(t.Assignee || '—')}</td><td class="date">${fmt(t.Created)}</td><td class="date">${fmt(t.Updated)}</td><td class="date ${late(t) ? 'c-bad' : ''}">${fmt(t.Deadline)}</td></tr>`;
