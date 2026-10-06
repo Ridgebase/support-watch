@@ -32,8 +32,8 @@
   .controls label[data-for] { display:none; }   /* the second switch depends on the tab */
   body[data-tab="pa"] .controls label[data-for="pa"], body[data-tab="bi"] .controls label[data-for="bi"], body[data-tab="apps"] .controls label[data-for="apps"] { display:inline-flex; }
   td.text { white-space:normal; min-width:160px; max-width:420px; }   /* error messages and connector lists wrap too */
-  body[data-tab="apps"] th, body[data-tab="apps"] td { white-space:normal; }
-  body[data-tab="apps"] td.date { white-space:nowrap; }   /* a date split over two lines reads badly */   /* every cell may wrap: the tables then always fit the page width, no sideways scroll */
+  body[data-tab="apps"] th, body[data-tab="apps"] td, body[data-tab="help"] th, body[data-tab="help"] td { white-space:normal; }
+  body[data-tab="apps"] td.date, body[data-tab="help"] td.date { white-space:nowrap; }   /* a date split over two lines reads badly */   /* every cell may wrap: the tables then always fit the page width, no sideways scroll */
   select { appearance:none; -webkit-appearance:none; font:inherit; color:var(--fg); background:var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' fill='none' stroke='%2376706a' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 10px center / 12px; border:1px solid var(--line); border-radius:6px; padding:6px 30px 6px 10px; min-width:160px; cursor:pointer; }
   select:hover { border-color:var(--muted); }
   select:focus { outline:2px solid var(--accent); outline-offset:1px; }
@@ -95,7 +95,7 @@
   <label data-for="pa"><span class="switch"><input type="checkbox" id="hidequiet" checked><span></span></span>Hide flows with 0 runs</label>
   <label data-for="bi"><span class="switch"><input type="checkbox" id="hidedisabled" checked><span></span></span>Hide disabled and stale models</label>
 </div>
-<div class="tabs" role="tablist"><button class="active" data-tab="pa" role="tab">Power Automate</button><button data-tab="bi" role="tab">Power BI</button><button data-tab="apps" role="tab">Power Apps</button></div>
+<div class="tabs" role="tablist"><button class="active" data-tab="pa" role="tab">Power Automate</button><button data-tab="bi" role="tab">Power BI</button><button data-tab="apps" role="tab">Power Apps</button><button data-tab="help" role="tab">Helpdesk</button></div>
 <div id="out"></div>
 <script>
 // Pre-aggregated by build-dashboard.ps1: { snapshots: {client: collectedAt}, flows: [per flow], days: [per client per day], fails: [failed runs] }
@@ -234,9 +234,26 @@ function render() {
     return;
   }
 
+  // Helpdesk: the Odoo tickets in the "In Progress" stage. Red = past its SLA deadline; the tab's badge counts those. A ticket whose
+  // customer matched no client (see collect.ps1) has Client = '' and shows under All clients only.
+  const late = t => !!t.Deadline && new Date(t.Deadline) < Date.now();
+  const PRIO = { Low: 0, Medium: 1, High: 2, Urgent: 3 };
+  const tkAll = (data.tickets || []).filter(t => !client || t.Client === client), tkLate = tkAll.filter(late).length;
+  document.querySelector('.tabs [data-tab="help"]').innerHTML = 'Helpdesk' + (tkLate ? `<span class="badge">${tkLate}</span>` : '');
+  if (tab === 'help') {
+    const tk = tkAll.filter(t => !only || late(t)).sort((a, b) => late(b) - late(a) || (PRIO[b.Priority] ?? 0) - (PRIO[a.Priority] ?? 0) || a.Created.localeCompare(b.Created));
+    if (!tk.length) h += '<p class="muted">No ticket in progress.</p>';
+    else {
+      h += `<h2 id="tickets">Tickets in progress <span class="muted">(${tk.length})</span></h2><div class="card wrap"><table><thead><tr><th>Customer</th><th>Ticket</th><th>Priority</th><th>Assigned to</th><th>Created</th><th>Last update</th><th>SLA deadline</th></tr></thead><tbody>`;
+      for (const t of tk) h += `<tr class="${late(t) ? 'bad' : ''}"><td>${esc(t.Customer || '—')}</td><td class="flow">#${esc(t.Ref)} ${esc(t.Ticket)}${copyBtn(t.Url)}</td><td class="${t.Priority === 'Urgent' ? 'c-bad' : t.Priority === 'High' ? 'c-warn' : ''}">${esc(t.Priority || '—')}</td><td>${esc(t.Assignee || '—')}</td><td class="date">${fmt(t.Created)}</td><td class="date">${fmt(t.Updated)}</td><td class="date ${late(t) ? 'c-bad' : ''}">${fmt(t.Deadline)}</td></tr>`;
+      h += '</tbody></table></div>';
+    }
+    document.getElementById('out').innerHTML = h;
+    return;
+  }
+
   // Power Automate tab
-  h += health(client);
-  const rank = { bad: 0, warn: 1, ok: 2, '': 3, off: 4 };
+  h += health(client);  const rank = { bad: 0, warn: 1, ok: 2, '': 3, off: 4 };
   const list = summary.filter(f => (!client || f.client === client) && (!only || problem(f)) && (!hideQuiet || f.runs > 0))
     .sort((a, b) => rank[cls(a)] - rank[cls(b)] || b.failed - a.failed || a.client.localeCompare(b.client) || a.flow.localeCompare(b.flow));
   h += `<h2 id="flows">Flows <span class="muted">(${list.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Flow</th><th>Enabled</th><th class="num">Runs</th><th class="num">Failed</th><th>Last run</th><th>Last status</th></tr></thead><tbody>`;
@@ -266,8 +283,8 @@ document.getElementById('out').addEventListener('click', e => {
   const b = e.target.closest('button.copy'); if (!b) return;
   navigator.clipboard.writeText(b.dataset.url).then(() => { b.textContent = '✓'; setTimeout(() => b.innerHTML = COPY_SVG, 1200); });
 });
-// Tabs: pa (default, no hash), bi (#bi), apps (#apps).
-let tab = ['bi', 'apps'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'pa';
+// Tabs: pa (default, no hash), bi (#bi), apps (#apps), help (#help).
+let tab = ['bi', 'apps', 'help'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'pa';
 const tabHash = () => tab === 'pa' ? '' : '#' + tab;
 document.querySelector('.tabs').addEventListener('click', e => {
   const b = e.target.closest('button[data-tab]'); if (!b) return;

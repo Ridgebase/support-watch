@@ -32,6 +32,10 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   account, other users' personal connections are not ours to watch): a connection whose status is not Connected and an app whose
   owner account is disabled or deleted in Entra are red and counted in the tab's badge. With a Power Platform admin role the
   whole environment is listed; otherwise only what the signed-in account can see.
+- The cloud job also reads, once (one Odoo database for all clients), the **Odoo Helpdesk** tickets whose stage is `In Progress`
+  (`out/tickets.csv`, Helpdesk tab: a ticket past its SLA deadline is red and counted in the tab's badge). A ticket belongs to the client
+  whose optional `"Odoo"` field in `CLIENTS_JSON` equals the ticket customer's company, or whose tenant's first label is contained in that
+  company name (`seguinmorris.com` ~ `Séguin Morris Inc`); the others show under All clients only.
 - `.github/workflows/watch.yml` runs both every 10 minutes. GitHub throttles its own `schedule` trigger (gaps of ~30 min
   were observed), so the 10-minute cadence comes from a free cron-job.org job that POSTs to the workflow's
   `dispatches` API with a fine-grained token (repo `support-watch`, permission Actions read/write, approved by an
@@ -56,6 +60,7 @@ All client-specific values live in GitHub secrets, nothing in this repo:
 | `CLIENTS_JSON`  | `[{"Name":"X","Tenant":"x.com","Environments":["Env display name", ...]}, ...]`            |
 | `RT_<NAME>`     | one per client, the refresh token written by `get-refresh-token.ps1`                       |
 | `CARRY_URL`     | raw URL of the gist where the laptop collector publishes its `data.json` (see below)              |
+| `ODOO_URL`, `ODOO_USER`, `ODOO_KEY` | the Odoo database (`https://<db>.odoo.com`), the user and their API key (Preferences > Account Security) for the Helpdesk tab |
 
 `CARRY_CLIENTS` (plain env in `watch.yml`, currently `SEMO`) names the clients the job never collects itself: they come
 from `CARRY_URL` only, i.e. from the Azure function, even on the days SEMO's Conditional Access lets GitHub's runners in.

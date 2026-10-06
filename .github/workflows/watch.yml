@@ -38,6 +38,9 @@ jobs:
           RT_TSMO:      ${{ secrets.RT_TSMO }}
           CARRY_URL:    ${{ secrets.CARRY_URL }}
           CARRY_CLIENTS: SEMO   # collected by the Azure function only (azure-function/), never from here
+          ODOO_URL:     ${{ secrets.ODOO_URL }}    # Odoo Helpdesk: tickets in progress (Helpdesk tab)
+          ODOO_USER:    ${{ secrets.ODOO_USER }}
+          ODOO_KEY:     ${{ secrets.ODOO_KEY }}
         run: ./scripts/collect.ps1
 
       # Azure Static Web Apps (free tier): the site requires a Microsoft sign-in and the invited "reader" role (scripts/staticwebapp.config.json).

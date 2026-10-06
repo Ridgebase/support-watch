@@ -10,6 +10,7 @@
 #                  model in those workspaces (same refresh token, exchanged for a Power BI API token) into powerbi.csv
 #                  Power Apps needs no option: every listed environment's canvas apps and connections go to powerapps.csv and
 #                  connections.csv (same refresh token exchanged for a Power Apps API token, Graph for the owners' account state)
+#   ODOO_URL, ODOO_USER, ODOO_KEY  optional: the Odoo Helpdesk tickets in progress go to tickets.csv (see the Helpdesk block)
 #   RT_<NAME>      the client's refresh token (from get-refresh-token.ps1), e.g. RT_SEMO
 #   NETLIFY_TOKEN  used by build-dashboard.ps1
 param([int]$Days = 7, [int]$Parallel = 8)
@@ -203,6 +204,37 @@ foreach ($c in $clients) {
     } catch { $failures += "$($c.Name): Power Apps collection failed: $($_.Exception.Message)" }
 }
 
+# Helpdesk: the Odoo tickets in the "In Progress" stage. One Odoo database for all clients, so collected once, from the cloud job only
+# (ODOO_URL, ODOO_USER, ODOO_KEY: a user API key, which works with 2FA; the database name is the host's first label, Odoo Online's rule).
+# A ticket's client: the CLIENTS_JSON entry whose optional "Odoo" field equals the customer's company in Odoo, else the one whose tenant's
+# first label is contained in that company name (seguinmorris.com ~ "Séguin Morris Inc") or whose Name appears in it as a word ("... (TSMO)"). Unmatched tickets keep Client = '' (shown under All clients).
+$tickets = [System.Collections.Generic.List[object]]::new()
+if ($env:ODOO_URL -and $env:ODOO_KEY) {
+    try {
+        $ou = $env:ODOO_URL.TrimEnd('/'); $odb = ([uri]$ou).Host.Split('.')[0]
+        $rpc = { param($svc, $m, $a)
+            $r = Invoke-RestMethod -Method Post -Uri "$ou/jsonrpc" -ContentType 'application/json' -TimeoutSec 60 -Body (@{ jsonrpc = '2.0'; method = 'call'; id = 1; params = @{ service = $svc; method = $m; args = $a } } | ConvertTo-Json -Depth 10 -Compress)
+            if ($r.error) { throw "$($r.error.data.message ?? $r.error.message)" }; $r.result }
+        $uid = & $rpc common authenticate @($odb, $env:ODOO_USER, $env:ODOO_KEY, @{})
+        if (-not $uid) { throw 'sign-in refused (ODOO_USER or ODOO_KEY)' }
+        $fields = 'ticket_ref', 'name', 'commercial_partner_id', 'stage_id', 'priority', 'user_id', 'create_date', 'write_date', 'sla_deadline'
+        $list = @(& $rpc object execute_kw @($odb, $uid, $env:ODOO_KEY, 'helpdesk.ticket', 'search_read', @(, @(, @('stage_id.name', '=', 'In Progress'))), @{ fields = $fields }))
+        # Odoo returns false for an empty field and [id, name] for a relation; its dates are naive UTC strings.
+        $m2o  = { param($v) if ($v -is [array]) { "$($v[1])" } else { '' } }
+        $odt  = { param($v) if ($v -is [string] -and $v) { & $toLocal ($v.Replace(' ', 'T') + 'Z') } else { '' } }
+        $norm = { param($s) (("$s".Normalize([Text.NormalizationForm]::FormD) -replace '\p{Mn}') -replace '[^a-zA-Z]').ToLower() }   # "Séguin Morris Inc" -> seguinmorrisinc
+        $prio = @{ '0' = 'Low'; '1' = 'Medium'; '2' = 'High'; '3' = 'Urgent' }
+        foreach ($t in $list) {
+            $cust = & $m2o $t.commercial_partner_id
+            # ponytail: name containment is a heuristic; a client it misses gets an explicit "Odoo" field in CLIENTS_JSON.
+            $cl = @($clients | Where-Object { ($_.Odoo -and $_.Odoo -eq $cust) -or ($cust -match "\b$([regex]::Escape($_.Name))\b") -or ($_.Tenant -and (& $norm $cust).Contains((& $norm $_.Tenant.Split('.')[0]))) })
+            $tickets.Add([pscustomobject]@{ Client = "$(@($cl)[0].Name)"; Customer = $cust; Ref = "$($t.ticket_ref)"; Ticket = "$($t.name)"; Stage = (& $m2o $t.stage_id)
+                Priority = "$($prio["$($t.priority)"])"; Assignee = (& $m2o $t.user_id); Created = (& $odt $t.create_date); Updated = (& $odt $t.write_date); Deadline = (& $odt $t.sla_deadline)
+                Url = "$ou/odoo/helpdesk/$($t.id)" })
+        }
+        Write-Host "Helpdesk: $($tickets.Count) ticket(s) in progress"
+    } catch { $failures += "Helpdesk collection failed: $($_.Exception.Message)" }
+}
 # Carry-over: a client that could not be signed in from here is taken from CARRY_URL, a data.json that the laptop
 # collector (flow-runs.ps1) publishes to a gist whenever it runs. Its snapshot time is kept, so the page shows STALE
 # for that client once the laptop has been off for an hour, instead of the client vanishing.
@@ -229,6 +261,7 @@ if ($pbi.Count)  { $pbi  | Export-Csv -Path "$out/powerbi.csv"   -NoTypeInformat
 if ($pbiRuns.Count) { $pbiRuns | Export-Csv -Path "$out/powerbi-runs.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/powerbi-runs.csv" -ErrorAction SilentlyContinue }
 if ($apps.Count) { $apps | Export-Csv -Path "$out/powerapps.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/powerapps.csv" -ErrorAction SilentlyContinue }
 if ($conns.Count) { $conns | Export-Csv -Path "$out/connections.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/connections.csv" -ErrorAction SilentlyContinue }
+if ($tickets.Count) { $tickets | Export-Csv -Path "$out/tickets.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/tickets.csv" -ErrorAction SilentlyContinue }
 & "$PSScriptRoot/build-dashboard.ps1"
 $failures | ForEach-Object { Write-Warning $_ }
 # Fail the job (GitHub emails the repo owner) only when nothing at all was collected: the collector itself is broken.
