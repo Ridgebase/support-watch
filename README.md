@@ -73,7 +73,8 @@ from `CARRY_URL` only, i.e. from the Azure function, even on the days SEMO's Con
 
 `notify.ps1` runs after each deploy. It emails one message per run listing the flows whose latest run has **newly**
 failed (a flow that keeps failing is announced once, until it recovers), and one weekly recap on Monday after 07:00
-Eastern with the last 7 days' totals per client and every flow that failed in the week. No recap on Monday morning =
+Eastern with the last 7 days' totals per client, every flow that failed in the week and the Helpdesk tickets in progress (those past
+SLA named). No recap on Monday morning =
 the job itself is broken. `gh workflow run watch.yml -f digest=true` sends a sample recap right away.
 `alerts.json` (committed by the workflow) remembers what was already announced.
 

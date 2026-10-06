@@ -84,6 +84,9 @@ if ($new -and -not $SampleDigest) {
 $today = $now.ToString('yyyy-MM-dd'); $from = $now.AddDays(-6).ToString('yyyy-MM-dd'); $to = $today   # data.json holds today and the six days before
 if (($now.DayOfWeek -eq 'Monday' -and $now.Hour -ge 7 -and $digest -ne $today -and -not $Sample) -or $SampleDigest) {
     $clients = @($d.snapshots.PSObject.Properties.Name | Sort-Object)
+    $nowIso  = $now.ToString('s')   # deadlines in data.json are Eastern ISO strings, compared as strings like $weekAgo; foreach (not a pipeline): an empty list must stay empty, $null piped would run once
+    $lateOf  = { param($t) @(foreach ($x in $t) { if ($x.Deadline -and (& $iso $x.Deadline) -lt $nowIso) { $x } }) }
+    $tkNames = { param($t) @(foreach ($x in $t) { [pscustomobject]@{ Name = "#$($x.Ref) $($x.Ticket)" } }) }
     $cards = foreach ($c in $clients) {
         $days = @($d.days | Where-Object Client -eq $c)   # data.json already holds exactly the last 7 days
         $runs = ($days | Measure-Object Runs -Sum).Sum; $bad = ($days | Measure-Object Failed -Sum).Sum; $ok = ($days | Measure-Object Succeeded -Sum).Sum; $can = ($days | Measure-Object Cancelled -Sum).Sum
@@ -104,8 +107,13 @@ if (($now.DayOfWeek -eq 'Monday' -and $now.Hour -ge 7 -and $digest -ne $today -a
         $ap = @($d.apps | Where-Object Client -eq $c); $kn = @($d.connections | Where-Object Client -eq $c)
         $orphan = @($ap | Where-Object { $_.OwnerState -in 'Disabled', 'Deleted' }); $broken = @($kn | Where-Object Status -ne 'Connected')
         $paLine = if ($ap -or $kn) { "<div style=""color:$($col.muted);font-size:12px;margin-top:10px"">Power Apps</div><div>$($ap.Count) apps &middot; $($kn.Count) connections &middot; <b style=""color:$(if ($broken) { $col.bad } else { $col.ok })"">$($broken.Count)</b> not connected &middot; <b style=""color:$(if ($orphan) { $col.bad } else { $col.ok })"">$($orphan.Count)</b> orphaned$(& $names 'Not connected' $broken 'Connection')$(& $names 'Orphaned' $orphan 'App')</div>" } else { '' }
-        & $card "$c $pills" "<div style=""color:$($col.muted);font-size:12px"">Last 7 days</div><div>$week</div>$pbLine$paLine$rows"
+        # Helpdesk: this client's Odoo tickets in progress; the ones past their SLA deadline are named. Customers matched to no client get their own card below.
+        $tk = @($d.tickets | Where-Object Client -eq $c); $late = & $lateOf $tk
+        $hdLine = if ($tk) { "<div style=""color:$($col.muted);font-size:12px;margin-top:10px"">Helpdesk</div><div><b>$($tk.Count)</b> tickets in progress &middot; <b style=""color:$(if ($late) { $col.bad } else { $col.ok })"">$($late.Count)</b> past SLA$(& $names 'Past SLA' (& $tkNames $late) 'Name')</div>" } else { '' }
+        & $card "$c $pills" "<div style=""color:$($col.muted);font-size:12px"">Last 7 days</div><div>$week</div>$pbLine$paLine$hdLine$rows"
     }
+    $other = @($d.tickets | Where-Object { -not $_.Client })
+    if ($other) { $cards = @($cards) + (& $card 'Helpdesk, other customers' (($other | Group-Object Customer | Sort-Object Name | ForEach-Object { $late = & $lateOf $_.Group; "<div style=""margin-top:6px""><b>$(& $esc $_.Name)</b>: $($_.Count) in progress &middot; <b style=""color:$(if ($late) { $col.bad } else { $col.ok })"">$($late.Count)</b> past SLA$(& $names 'Past SLA' (& $tkNames $late) 'Name')</div>" }) -join '')) }
     $short = ($clients | ForEach-Object { $n = @($failing | Where-Object Client -eq $_).Count; "$_ $(if ($n) { "$n failing" } else { 'healthy' })" }) -join ', '
     $mails += @{ subject = "$(if ($SampleDigest) { '[Sample] ' })[Support Watch] Weekly recap $from to ${to}: $short"; body = & $wrap "Recap of $from to $to, sent every Monday morning; no recap means the job is down" "Week in review: $short" ($cards -join '') }
     if (-not $SampleDigest) { $digest = $today }
