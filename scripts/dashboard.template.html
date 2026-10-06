@@ -120,9 +120,13 @@ const localDate = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2
 
 const sel = document.getElementById('client');
 for (const c of Object.keys(latest).sort()) sel.append(new Option(c, c));
-document.getElementById('meta').innerHTML =
-  // STALE = the scheduled task has not run for an hour: the page is old, not the flows.
-  [...Object.entries(latest), ...(data.helpdesk ? [['Helpdesk', data.helpdesk]] : [])].map(([c, t]) => `${esc(c)}: snapshot ${fmt(t)}` + (Date.now() - new Date(t) > STALE_MS ? ' <b class="c-bad">STALE</b>' : '')).join(' · ') || 'No data yet. Run flow-runs.ps1 first.';
+const snaps = [...Object.entries(latest), ...(data.helpdesk ? [['Helpdesk', data.helpdesk]] : [])];
+// "Snapshot: SEMO 14:03 · TSMO 14:05 · Helpdesk 14:03": the time alone when it is today's, the date too otherwise.
+// STALE = the scheduled task has not run for an hour: the page is old, not the flows.
+const hm = iso => iso.slice(0, 10) === localDate(new Date()) ? iso.slice(11, 16) : fmt(iso);
+document.getElementById('meta').innerHTML = snaps.length
+  ? 'Snapshot: ' + snaps.map(([c, t]) => `${esc(c)} <b>${hm(t)}</b>` + (Date.now() - new Date(t) > STALE_MS ? ' <b class="c-bad">STALE</b>' : '')).join(' · ')
+  : 'No data yet. Run flow-runs.ps1 first.';
 
 function health(client) {
   const fl = summary.filter(f => !client || f.client === client);
@@ -187,7 +191,7 @@ function render() {
         <div class="status"><span class="dot" style="background:var(--${tone})"></span><b class="c-${tone}">${label}</b></div>
         <div class="kpi"><div class="big">${pct(tOk, tOk + tBad)}</div><small>Today's success rate (${tOk} / ${tOk + tBad} refreshes)</small></div>
         <div class="stat"><div class="big">${w}</div><small>Refreshes, last 7 days</small></div>
-        <div class="stat ${wBad ? 'c-bad' : ''}"><div class="big">${wBad}</div><small>Failed, last 7 days</small></div>
+        <div class="stat ${wBad ? 'c-bad' : ''}"><a href="#pbifailed" class="big">${wBad}</a><small>Failed, last 7 days</small></div>
         <div class="stat ${biBad ? 'c-bad' : ''}"><a href="#powerbi" class="big">${biBad}</a><small>Models needing attention</small></div>
         <div class="stat ${running ? 'c-grey' : ''}"><div class="big">${running}</div><small>Refreshing now</small></div>
       </div>`;
@@ -204,6 +208,14 @@ function render() {
     h += `<h2 id="powerbi">Power BI refreshes <span class="muted">(${pbi.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Workspace</th><th>Model</th><th class="num">Refreshes</th><th class="num">Failed</th><th>Last refresh</th><th class="num">Duration</th><th>Next refresh</th><th>Status</th></tr></thead><tbody>`;
     for (const r of pbi) h += `<tr class="${pbiCls(r)}"><td>${esc(r.Client)}</td><td>${esc(r.Workspace)}</td><td class="flow">${esc(r.Model)}${copyBtn(r.Url)}</td><td class="num">${r.Refreshes ?? '—'}</td><td class="num ${+r.Failed ? 'c-bad' : ''}">${r.Failed ?? '—'}</td><td>${fmt(r.Start)}</td><td class="num">${dur(r)}</td><td>${fmt(r.Next)}</td><td class="${statusClass(pbiLabel(r))}">${esc(pbiLabel(r))}</td></tr>`;
     h += '</tbody></table></div>';
+    }
+    // Which refreshes failed this week (the card's "Failed" count links here), newest first.
+    const pf = (data.pbifails || []).filter(r => !client || r.Client === client).sort((a, b) => b.Start.localeCompare(a.Start)).slice(0, 50);
+    if (pf.length) {
+      h += `<h2 id="pbifailed">Failed refreshes <span class="muted">(last 7 days)</span></h2><div class="card wrap"><table><thead><tr><th>When</th><th>Client</th><th>Workspace</th><th>Model</th><th class="num">Duration</th><th>Type</th></tr></thead><tbody>`;
+      const urlOf = r => ((data.powerbi || []).find(m => m.Client === r.Client && m.ModelId === r.ModelId) || {}).Url;
+      for (const r of pf) h += `<tr><td>${fmt(r.Start)}</td><td>${esc(r.Client)}</td><td>${esc(r.Workspace)}</td><td class="flow">${esc(r.Model)}${copyBtn(urlOf(r))}</td><td class="num">${dur(r)}</td><td>${esc(r.Type)}</td></tr>`;
+      h += '</tbody></table></div>';
     }
     document.getElementById('out').innerHTML = h;
     return;

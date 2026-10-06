@@ -22,7 +22,7 @@ $apps    = @(if (Test-Path $AppsCsv) { @(Import-Csv $AppsCsv) } else { @() })   
 $conns   = @(if (Test-Path $ConnCsv) { @(Import-Csv $ConnCsv) } else { @() })
 $tickets = @(if (Test-Path $TicketsCsv) { @(Import-Csv $TicketsCsv) } else { @() })   # Odoo Helpdesk tickets in progress, from collect.ps1 (cloud job only, never carried over)
 $pbiRuns = @(if (Test-Path $PbiRunsCsv) { @(Import-Csv $PbiRunsCsv) } else { @() })   # one row per Power BI refresh in the window, from collect.ps1
-$pbidays = @()
+$pbidays = @(); $pbifails = @()
 
 # Power BI week, same shape as the flows: totals per model on its row, totals per client per day for the tab's recap and the weekly mail.
 foreach ($m in $powerbi) {
@@ -30,6 +30,7 @@ foreach ($m in $powerbi) {
     $m | Add-Member -NotePropertyName Refreshes -NotePropertyValue $mr.Count -Force
     $m | Add-Member -NotePropertyName Failed -NotePropertyValue @($mr | Where-Object Status -eq 'Failed').Count -Force
 }
+$pbifails = @($pbiRuns | Where-Object Status -eq 'Failed' | Sort-Object Start -Descending | Select-Object -First 100 Client, Workspace, Model, ModelId, Start, End, Type)   # the Power BI tab's "Failed refreshes" section
 foreach ($g in $pbiRuns | Group-Object Client) {
     foreach ($dg in $g.Group | Group-Object { $_.Start.Substring(0, 10) }) {
         $pbidays += [pscustomobject]@{ Client = $g.Name; Day = $dg.Name; Refreshes = $dg.Count
@@ -62,10 +63,10 @@ foreach ($g in $rows | Group-Object Client) {
 if (Test-Path $Carry) {
     $c = Get-Content $Carry -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($p in $c.snapshots.PSObject.Properties) { $snapshots[$p.Name] = $p.Value }
-    $flows += @($c.flows); $days += @($c.days); $fails += @($c.fails); $powerbi += @($c.powerbi); $pbidays += @($c.pbidays); $apps += @($c.apps); $conns += @($c.connections)
+    $flows += @($c.flows); $days += @($c.days); $fails += @($c.fails); $powerbi += @($c.powerbi); $pbidays += @($c.pbidays); if ($c.pbifails) { $pbifails += @($c.pbifails) }; $apps += @($c.apps); $conns += @($c.connections)
 }
 
-$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi; pbidays = $pbidays; apps = $apps; connections = $conns; tickets = $tickets; helpdesk = $HelpdeskAt } | ConvertTo-Json -Depth 5 -Compress
+$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi; pbidays = $pbidays; pbifails = $pbifails; apps = $apps; connections = $conns; tickets = $tickets; helpdesk = $HelpdeskAt } | ConvertTo-Json -Depth 5 -Compress
 $data = $data.Replace('</', '<\/')   # a "</script>" inside any text (a connection error, a flow name) would end the page's data script; "<\/" is the same string in JSON
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $html = (Get-Content "$PSScriptRoot/dashboard.template.html" -Raw -Encoding UTF8).Replace('__DATA__', $data)

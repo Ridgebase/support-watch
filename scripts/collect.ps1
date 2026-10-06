@@ -243,11 +243,11 @@ Remove-Item "$out/carry.json" -ErrorAction SilentlyContinue
 if ($blocked -and $env:CARRY_URL) {
     try {
         $c = Invoke-RestMethod -Uri "$($env:CARRY_URL)?t=$(Get-Date -UFormat %s)"   # cache-buster: gist raw URLs are cached ~5 min
-        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @(); pbidays = @(); apps = @(); connections = @() }
+        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @(); pbidays = @(); pbifails = @(); apps = @(); connections = @() }
         foreach ($name in $blocked) {
             if ($c.snapshots.$name) { $carry.snapshots[$name] = $c.snapshots.$name }
             $carry.flows += @($c.flows | Where-Object Client -eq $name); $carry.days += @($c.days | Where-Object Client -eq $name); $carry.fails += @($c.fails | Where-Object Client -eq $name)
-            $carry.powerbi += @($c.powerbi | Where-Object Client -eq $name); $carry.pbidays += @($c.pbidays | Where-Object Client -eq $name); $carry.apps += @($c.apps | Where-Object Client -eq $name); $carry.connections += @($c.connections | Where-Object Client -eq $name)
+            $carry.powerbi += @($c.powerbi | Where-Object Client -eq $name); $carry.pbidays += @($c.pbidays | Where-Object Client -eq $name); $carry.pbifails += @($c.pbifails | Where-Object Client -eq $name); $carry.apps += @($c.apps | Where-Object Client -eq $name); $carry.connections += @($c.connections | Where-Object Client -eq $name)
             Write-Host "$name`: carried over $(@($c.flows | Where-Object Client -eq $name).Count) flows from $($c.snapshots.$name)"
         }
         $carry | ConvertTo-Json -Depth 5 -Compress | Set-Content "$out/carry.json" -Encoding UTF8
