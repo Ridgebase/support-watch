@@ -280,7 +280,8 @@ function render() {
     return;
   }
 
-  // Power Automate tab
+  // Power Automate tab. A selected customer with no flow at all (a helpdesk-only customer) gets the Power BI tab's kind of empty message, not a Waiting card.
+  if (client && !summary.some(f => f.client === client)) { document.getElementById('out').innerHTML = '<p class="muted">No Power Automate flow to show.</p>'; return; }
   h += health(client);  const rank = { bad: 0, warn: 1, ok: 2, '': 3, off: 4 };
   const list = summary.filter(f => (!client || f.client === client) && (!only || problem(f)) && (!hideQuiet || f.runs > 0))
     .sort((a, b) => rank[cls(a)] - rank[cls(b)] || b.failed - a.failed || a.client.localeCompare(b.client) || a.flow.localeCompare(b.flow));
