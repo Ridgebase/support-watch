@@ -6,6 +6,7 @@
 param(
     [string]$Csv    = "$PSScriptRoot/../out/flow-runs.csv",
     [string]$PbiCsv = "$PSScriptRoot/../out/powerbi.csv",
+    [string]$PbiRunsCsv = "$PSScriptRoot/../out/powerbi-runs.csv",
     [string]$AppsCsv = "$PSScriptRoot/../out/powerapps.csv",
     [string]$ConnCsv = "$PSScriptRoot/../out/connections.csv",
     [string]$OutDir = "$PSScriptRoot/../out/site",
@@ -17,6 +18,21 @@ $snapshots = @{}; $flows = @(); $days = @(); $fails = @()
 $powerbi = @(if (Test-Path $PbiCsv) { @(Import-Csv $PbiCsv) } else { @() })   # last refresh per Power BI semantic model, from collect.ps1
 $apps    = @(if (Test-Path $AppsCsv) { @(Import-Csv $AppsCsv) } else { @() })   # canvas apps and connections, from collect.ps1
 $conns   = @(if (Test-Path $ConnCsv) { @(Import-Csv $ConnCsv) } else { @() })
+$pbiRuns = @(if (Test-Path $PbiRunsCsv) { @(Import-Csv $PbiRunsCsv) } else { @() })   # one row per Power BI refresh in the window, from collect.ps1
+$pbidays = @()
+
+# Power BI week, same shape as the flows: totals per model on its row, totals per client per day for the tab's recap and the weekly mail.
+foreach ($m in $powerbi) {
+    $mr = @($pbiRuns | Where-Object { $_.Client -eq $m.Client -and $_.ModelId -eq $m.ModelId })
+    $m | Add-Member -NotePropertyName Refreshes -NotePropertyValue $mr.Count -Force
+    $m | Add-Member -NotePropertyName Failed -NotePropertyValue @($mr | Where-Object Status -eq 'Failed').Count -Force
+}
+foreach ($g in $pbiRuns | Group-Object Client) {
+    foreach ($dg in $g.Group | Group-Object { $_.Start.Substring(0, 10) }) {
+        $pbidays += [pscustomobject]@{ Client = $g.Name; Day = $dg.Name; Refreshes = $dg.Count
+            Succeeded = @($dg.Group | Where-Object Status -eq 'Completed').Count; Failed = @($dg.Group | Where-Object Status -eq 'Failed').Count }
+    }
+}
 
 foreach ($g in $rows | Group-Object Client) {
     $snapshots[$g.Name] = ($g.Group | Sort-Object Collected -Descending)[0].Collected
@@ -43,10 +59,10 @@ foreach ($g in $rows | Group-Object Client) {
 if (Test-Path $Carry) {
     $c = Get-Content $Carry -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($p in $c.snapshots.PSObject.Properties) { $snapshots[$p.Name] = $p.Value }
-    $flows += @($c.flows); $days += @($c.days); $fails += @($c.fails); $powerbi += @($c.powerbi); $apps += @($c.apps); $conns += @($c.connections)
+    $flows += @($c.flows); $days += @($c.days); $fails += @($c.fails); $powerbi += @($c.powerbi); $pbidays += @($c.pbidays); $apps += @($c.apps); $conns += @($c.connections)
 }
 
-$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi; apps = $apps; connections = $conns } | ConvertTo-Json -Depth 5 -Compress
+$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi; pbidays = $pbidays; apps = $apps; connections = $conns } | ConvertTo-Json -Depth 5 -Compress
 $data = $data.Replace('</', '<\/')   # a "</script>" inside any text (a connection error, a flow name) would end the page's data script; "<\/" is the same string in JSON
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $html = (Get-Content "$PSScriptRoot/dashboard.template.html" -Raw -Encoding UTF8).Replace('__DATA__', $data)

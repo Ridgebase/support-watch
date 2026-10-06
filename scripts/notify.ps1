@@ -95,8 +95,16 @@ if (($now.DayOfWeek -eq 'Monday' -and $now.Hour -ge 7 -and $digest -ne $today -a
         $week = if ($runs) { "<b>$runs</b> runs &middot; <b style=""color:$(if ($bad) { $col.bad } else { $col.ok })"">$bad</b> failed &middot; $can cancelled &middot; $rate success" } else { 'no runs' }
         $rows = if ($hit) { "<div style=""color:$($col.muted);font-size:12px;margin-top:10px"">Flows with failures this week</div><table style=""width:100%;border-collapse:collapse"">$(($hit | ForEach-Object { & $flowRow $_ }) -join '')</table>" } else { '' }
         $pb = @($d.powerbi | Where-Object Client -eq $c); $pbBad = @($pb | Where-Object { $_.Status -eq 'Failed' -and (& $iso $_.Start) -gt $weekAgo })
-        $pbLine = if ($pb) { "<div style=""color:$($col.muted);font-size:12px;margin-top:10px"">Power BI</div><div>$($pb.Count) models &middot; <b style=""color:$(if ($pbBad) { $col.bad } else { $col.ok })"">$($pbBad.Count)</b> with a failed last refresh$(if ($pbBad) { ': ' + (($pbBad | ForEach-Object { & $esc $_.Model }) -join ', ') })</div>" } else { '' }
-        & $card "$c $pills" "<div style=""color:$($col.muted);font-size:12px"">Last 7 days</div><div>$week</div>$pbLine$rows"
+        # Power BI week from pbidays (per client per day), like the flows; then the models whose last refresh failed, by name.
+        $pbd = @($d.pbidays | Where-Object Client -eq $c); $pbRuns = [int]($pbd | Measure-Object Refreshes -Sum).Sum; $pbOk = [int]($pbd | Measure-Object Succeeded -Sum).Sum; $pbFail = [int]($pbd | Measure-Object Failed -Sum).Sum
+        $pbRate = if ($pbOk + $pbFail) { "$([math]::Round(100 * $pbOk / ($pbOk + $pbFail), 2))%" } else { '&mdash;' }
+        $names = { param($label, $items, $prop) if ($items) { '<br>' + $label + ': <b style="color:' + $col.bad + '">' + (($items | ForEach-Object { & $esc $_.$prop }) -join ', ') + '</b>' } else { '' } }
+        $pbLine = if ($pb) { "<div style=""color:$($col.muted);font-size:12px;margin-top:10px"">Power BI</div><div>$($pb.Count) models &middot; <b>$pbRuns</b> refreshes &middot; <b style=""color:$(if ($pbFail) { $col.bad } else { $col.ok })"">$pbFail</b> failed &middot; $pbRate success$(& $names 'Failed last refresh' $pbBad 'Model')</div>" } else { '' }
+        # Power Apps: inventory counts; a connection not Connected or an app whose owner account is gone is named (same rule as the tab's red rows).
+        $ap = @($d.apps | Where-Object Client -eq $c); $kn = @($d.connections | Where-Object Client -eq $c)
+        $orphan = @($ap | Where-Object { $_.OwnerState -in 'Disabled', 'Deleted' }); $broken = @($kn | Where-Object Status -ne 'Connected')
+        $paLine = if ($ap -or $kn) { "<div style=""color:$($col.muted);font-size:12px;margin-top:10px"">Power Apps</div><div>$($ap.Count) apps &middot; $($kn.Count) connections &middot; <b style=""color:$(if ($broken) { $col.bad } else { $col.ok })"">$($broken.Count)</b> not connected &middot; <b style=""color:$(if ($orphan) { $col.bad } else { $col.ok })"">$($orphan.Count)</b> orphaned$(& $names 'Not connected' $broken 'Connection')$(& $names 'Orphaned' $orphan 'App')</div>" } else { '' }
+        & $card "$c $pills" "<div style=""color:$($col.muted);font-size:12px"">Last 7 days</div><div>$week</div>$pbLine$paLine$rows"
     }
     $short = ($clients | ForEach-Object { $n = @($failing | Where-Object Client -eq $_).Count; "$_ $(if ($n) { "$n failing" } else { 'healthy' })" }) -join ', '
     $mails += @{ subject = "$(if ($SampleDigest) { '[Sample] ' })[Support Watch] Weekly recap $from to ${to}: $short"; body = & $wrap "Recap of $from to $to, sent every Monday morning; no recap means the job is down" "Week in review: $short" ($cards -join '') }

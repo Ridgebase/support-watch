@@ -25,8 +25,9 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   configured environments through the Flow REST API, and writes `out/flow-runs.csv`.
 - `build-dashboard.ps1` aggregates that CSV into `out/site/data.json` (per-flow and per-day totals, failed runs; ~40 KB
   instead of every run) and renders `out/site/index.html` from `dashboard.template.html`.
-- The same run also collects, per client, the last refresh of the Power BI models listed under `PowerBI` in `CLIENTS_JSON`
-  (`out/powerbi.csv`, Power BI tab) and, for every listed environment, the canvas apps and connections
+- The same run also collects, per client, the refresh history of the Power BI models listed under `PowerBI` in `CLIENTS_JSON`
+  (`out/powerbi.csv` = last refresh per model, `out/powerbi-runs.csv` = every refresh of the window, aggregated per day into
+  `pbidays` for the Power BI tab's recap and the weekly mail) and, for every listed environment, the canvas apps and connections
   (`out/powerapps.csv`, `out/connections.csv`, Power Apps tab; connections only those owned by the signed-in integration
   account, other users' personal connections are not ours to watch): a connection whose status is not Connected and an app whose
   owner account is disabled or deleted in Entra are red and counted in the tab's badge. With a Power Platform admin role the

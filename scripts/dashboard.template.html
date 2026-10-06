@@ -176,10 +176,33 @@ function render() {
   const biBad = (data.powerbi || []).filter(r => (!client || r.Client === client) && pbiCls(r) === 'bad').length;
   document.querySelector('.tabs [data-tab="bi"]').innerHTML = 'Power BI' + (biBad ? `<span class="badge">${biBad}</span>` : '');
   if (tab === 'bi') {
+    // Recap in the Power Automate header's shape: today's rate and the week's totals from pbidays (one row per client per day, finished refreshes only).
+    const all = (data.powerbi || []).filter(r => !client || r.Client === client), bdays = (data.pbidays || []).filter(d => !client || d.Client === client);
+    if (all.length) {
+      const today = localDate(new Date()), tRows = bdays.filter(d => d.Day === today), tOk = sum(tRows, 'Succeeded'), tBad = sum(tRows, 'Failed');
+      const w = sum(bdays, 'Refreshes'), wBad = sum(bdays, 'Failed'), running = all.filter(r => r.Status === 'Unknown').length;
+      const stale = Object.keys(latest).filter(c => !client || c === client).some(c => Date.now() - new Date(latest[c]) > STALE_MS);
+      const [label, tone] = stale ? ['Stale data', 'grey'] : biBad ? [`${biBad} model${biBad > 1 ? 's' : ''} failing`, 'bad'] : tBad ? ['Recovered today', 'warn'] : w ? ['All refreshes OK', 'ok'] : ['Waiting', 'grey'];
+      h += `<div class="card health">
+        <div class="status"><span class="dot" style="background:var(--${tone})"></span><b class="c-${tone}">${label}</b></div>
+        <div class="kpi"><div class="big">${pct(tOk, tOk + tBad)}</div><small>Today's success rate (${tOk} / ${tOk + tBad} refreshes)</small></div>
+        <div class="stat"><div class="big">${w}</div><small>Refreshes, last 7 days</small></div>
+        <div class="stat ${wBad ? 'c-bad' : ''}"><div class="big">${wBad}</div><small>Failed, last 7 days</small></div>
+        <div class="stat ${biBad ? 'c-bad' : ''}"><a href="#powerbi" class="big">${biBad}</a><small>Models needing attention</small></div>
+        <div class="stat ${running ? 'c-grey' : ''}"><div class="big">${running}</div><small>Refreshing now</small></div>
+      </div>`;
+      const days7 = [...Array(7)].map((_, i) => { const d = new Date(); d.setDate(d.getDate() - i); return localDate(d); });
+      h += '<div class="card wrap" style="margin-bottom:20px"><table><thead><tr><th>Date</th><th class="num">Refreshes</th><th class="num c-ok">Succeeded</th><th class="num c-bad">Failed</th><th class="num">Rate</th></tr></thead><tbody>';
+      for (const d of days7) {
+        const rs = bdays.filter(r => r.Day === d), ok = sum(rs, 'Succeeded'), bad = sum(rs, 'Failed');
+        h += `<tr class="${d === today ? 'today' : ''}"><td>${d === today ? 'Today' : d}</td><td class="num">${sum(rs, 'Refreshes')}</td><td class="num">${ok}</td><td class="num">${bad}</td><td class="num">${pct(ok, ok + bad)}</td></tr>`;
+      }
+      h += '</tbody></table></div>';
+    }
     if (!pbi.length) h += '<p class="muted">No Power BI refresh to show.</p>';
     else {
-    h += `<h2 id="powerbi">Power BI refreshes <span class="muted">(${pbi.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Workspace</th><th>Model</th><th>Last refresh</th><th class="num">Duration</th><th>Next refresh</th><th>Status</th></tr></thead><tbody>`;
-    for (const r of pbi) h += `<tr class="${pbiCls(r)}"><td>${esc(r.Client)}</td><td>${esc(r.Workspace)}</td><td class="flow">${esc(r.Model)}${copyBtn(r.Url)}</td><td>${fmt(r.Start)}</td><td class="num">${dur(r)}</td><td>${fmt(r.Next)}</td><td class="${statusClass(pbiLabel(r))}">${esc(pbiLabel(r))}</td></tr>`;
+    h += `<h2 id="powerbi">Power BI refreshes <span class="muted">(${pbi.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Workspace</th><th>Model</th><th class="num">Refreshes</th><th class="num">Failed</th><th>Last refresh</th><th class="num">Duration</th><th>Next refresh</th><th>Status</th></tr></thead><tbody>`;
+    for (const r of pbi) h += `<tr class="${pbiCls(r)}"><td>${esc(r.Client)}</td><td>${esc(r.Workspace)}</td><td class="flow">${esc(r.Model)}${copyBtn(r.Url)}</td><td class="num">${r.Refreshes ?? '—'}</td><td class="num ${+r.Failed ? 'c-bad' : ''}">${r.Failed ?? '—'}</td><td>${fmt(r.Start)}</td><td class="num">${dur(r)}</td><td>${fmt(r.Next)}</td><td class="${statusClass(pbiLabel(r))}">${esc(pbiLabel(r))}</td></tr>`;
     h += '</tbody></table></div>';
     }
     document.getElementById('out').innerHTML = h;

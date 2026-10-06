@@ -31,6 +31,7 @@ $since     = $nowUtc.AddDays(-$Days)
 $out       = Join-Path (Split-Path $PSScriptRoot) 'out'; New-Item -ItemType Directory -Force $out | Out-Null   # everything generated lives in out/
 $rows      = [System.Collections.Generic.List[object]]::new()
 $pbi       = [System.Collections.Generic.List[object]]::new()   # one row per semantic model: its last refresh
+$pbiRuns   = [System.Collections.Generic.List[object]]::new()   # one row per Power BI refresh in the window: the tab's recap and the weekly mail (same shape as flow runs)
 $apps      = [System.Collections.Generic.List[object]]::new()   # one row per canvas app: owner, sharing, connectors
 $conns     = [System.Collections.Generic.List[object]]::new()   # one row per connection: its status (an expired credential is the usual "the app stopped working")
 $failures  = @()
@@ -132,9 +133,16 @@ foreach ($c in $clients) {
             }
             foreach ($g in $groups) {
                 foreach ($ds in (Invoke-RestMethod -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($g.id)/datasets" -Headers $ph).value) {
-                    $r   = try { @((Invoke-RestMethod -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($g.id)/datasets/$($ds.id)/refreshes?`$top=1" -Headers $ph).value)[0] } catch { $null }
+                    # Refresh history, newest first (the service keeps about 60 entries): the first one is the model's row, the week's go to powerbi-runs.csv.
+                    $hist = try { @((Invoke-RestMethod -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($g.id)/datasets/$($ds.id)/refreshes?`$top=60" -Headers $ph).value) } catch { @() }
+                    $r   = if ($hist) { $hist[0] } else { $null }
                     $sch = try { Invoke-RestMethod -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($g.id)/datasets/$($ds.id)/refreshSchedule" -Headers $ph } catch { $null }
                     $toLocal = { param($s) if ($s) { [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal), $tz).ToString('s') } else { '' } }
+                    foreach ($x in $hist) {   # Unknown = still running: not a finished refresh
+                        if ($x.startTime -and $x.status -ne 'Unknown' -and [datetime]::Parse($x.startTime, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) -ge $since) {
+                            $pbiRuns.Add([pscustomobject]@{ Client = $c.Name; Workspace = $g.name; Model = $ds.name; ModelId = $ds.id; Start = (& $toLocal $x.startTime); End = (& $toLocal $x.endTime); Status = $x.status; Type = "$($x.refreshType)" })
+                        }
+                    }
                     $pbi.Add([pscustomobject]@{ Client = $c.Name; Workspace = $g.name; WorkspaceId = $g.id; Model = $ds.name; ModelId = $ds.id
                         Start = (& $toLocal $r.startTime); End = (& $toLocal $r.endTime); Status = $(if ($r) { $r.status } else { 'NO_REFRESH' }); Type = "$($r.refreshType)"
                         Next = (& $nextRefresh $sch); Url = "https://app.powerbi.com/groups/$($g.id)/settings/datasets/$($ds.id)" })
@@ -202,11 +210,11 @@ Remove-Item "$out/carry.json" -ErrorAction SilentlyContinue
 if ($blocked -and $env:CARRY_URL) {
     try {
         $c = Invoke-RestMethod -Uri "$($env:CARRY_URL)?t=$(Get-Date -UFormat %s)"   # cache-buster: gist raw URLs are cached ~5 min
-        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @(); apps = @(); connections = @() }
+        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @(); pbidays = @(); apps = @(); connections = @() }
         foreach ($name in $blocked) {
             if ($c.snapshots.$name) { $carry.snapshots[$name] = $c.snapshots.$name }
             $carry.flows += @($c.flows | Where-Object Client -eq $name); $carry.days += @($c.days | Where-Object Client -eq $name); $carry.fails += @($c.fails | Where-Object Client -eq $name)
-            $carry.powerbi += @($c.powerbi | Where-Object Client -eq $name); $carry.apps += @($c.apps | Where-Object Client -eq $name); $carry.connections += @($c.connections | Where-Object Client -eq $name)
+            $carry.powerbi += @($c.powerbi | Where-Object Client -eq $name); $carry.pbidays += @($c.pbidays | Where-Object Client -eq $name); $carry.apps += @($c.apps | Where-Object Client -eq $name); $carry.connections += @($c.connections | Where-Object Client -eq $name)
             Write-Host "$name`: carried over $(@($c.flows | Where-Object Client -eq $name).Count) flows from $($c.snapshots.$name)"
         }
         $carry | ConvertTo-Json -Depth 5 -Compress | Set-Content "$out/carry.json" -Encoding UTF8
@@ -218,6 +226,7 @@ if ($blocked -and $env:CARRY_URL) {
 $collected = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s'); foreach ($r in $rows) { $r.Collected = $collected }
 if ($rows.Count) { $rows | Export-Csv -Path "$out/flow-runs.csv" -NoTypeInformation -Encoding UTF8 }
 if ($pbi.Count)  { $pbi  | Export-Csv -Path "$out/powerbi.csv"   -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/powerbi.csv" -ErrorAction SilentlyContinue }
+if ($pbiRuns.Count) { $pbiRuns | Export-Csv -Path "$out/powerbi-runs.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/powerbi-runs.csv" -ErrorAction SilentlyContinue }
 if ($apps.Count) { $apps | Export-Csv -Path "$out/powerapps.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/powerapps.csv" -ErrorAction SilentlyContinue }
 if ($conns.Count) { $conns | Export-Csv -Path "$out/connections.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/connections.csv" -ErrorAction SilentlyContinue }
 & "$PSScriptRoot/build-dashboard.ps1"
