@@ -35,10 +35,15 @@ $why       = { param($e) $m = @(); while ($e) { $m += $e.Message; $e = $e.InnerE
 $tlsProbe = { param($hostName)
     $info = @{ text = '' }
     $cb = { param($s, $cert, $chain, $errors)
-        $info.text = "errors=$errors; " + (($chain.ChainElements | ForEach-Object { "$($_.Certificate.Subject -replace ',.*') [$($_.Certificate.NotBefore.ToUniversalTime().ToString('u')) .. $($_.Certificate.NotAfter.ToUniversalTime().ToString('u'))] $($_.Certificate.Thumbprint.Substring(0,8)) status=$(($_.ChainElementStatus.Status -join ',') -replace '^$','ok')" }) -join ' | ')
+        $extra = [Security.Cryptography.X509Certificates.X509Certificate2Collection]::new(); foreach ($e in $chain.ChainElements) { $null = $extra.Add($e.Certificate) }
+        # Rebuild the chain at several verification times: which offset from UTC makes the host accept today's leaf?
+        $tries = foreach ($off in -12, -8, -4, 0, 4, 8, 12) { $x = [Security.Cryptography.X509Certificates.X509Chain]::new(); $x.ChainPolicy.RevocationMode = 'NoCheck'; $x.ChainPolicy.ExtraStore.AddRange($extra); $x.ChainPolicy.VerificationTime = [datetime]::UtcNow.AddHours($off); "utc${off}h=$(if ($x.Build($cert)) { 'ok' } else { $x.ChainStatus.Status -join ',' })" }
+        $d = [Security.Cryptography.X509Certificates.X509Chain]::new().ChainPolicy.VerificationTime
+        $info.text = "errors=$errors; default VerificationTime=$($d.ToString('u')) kind=$($d.Kind); builds: $($tries -join ' '); chain: " + (($chain.ChainElements | ForEach-Object { "$($_.Certificate.Subject -replace ',.*') [$($_.Certificate.NotBefore.ToUniversalTime().ToString('u')) .. $($_.Certificate.NotAfter.ToUniversalTime().ToString('u'))] $($_.Certificate.Thumbprint.Substring(0,8)) status=$(($_.ChainElementStatus.Status -join ',') -replace '^$','ok')" }) -join ' | ')
         $true }.GetNewClosure()
     try { $tcp = [Net.Sockets.TcpClient]::new($hostName, 443); $ssl = [Net.Security.SslStream]::new($tcp.GetStream(), $false, $cb); $ssl.AuthenticateAsClient($hostName); $ssl.Dispose(); $tcp.Dispose() } catch { $info.text += " probe error: $($_.Exception.Message)" }
-    "TLS probe $hostName -> $([Net.Dns]::GetHostAddresses($hostName).IPAddressToString -join ',') at utc=$([datetime]::UtcNow.ToString('u')) local=$([datetime]::Now.ToString('u')) tz=$([TimeZoneInfo]::Local.Id): $($info.text)"
+    $os = try { (Get-Content /etc/os-release -First 1) } catch { 'windows' }; $ossl = try { & openssl version 2>$null } catch { '' }
+    "TLS probe $hostName -> $([Net.Dns]::GetHostAddresses($hostName).IPAddressToString -join ',') at utc=$([datetime]::UtcNow.ToString('u')) local=$([datetime]::Now.ToString('u')) tz=$([TimeZoneInfo]::Local.Id) $os $ossl $([Runtime.InteropServices.RuntimeInformation]::FrameworkDescription): $($info.text)"
 }
 $rows      = [System.Collections.Generic.List[object]]::new()
 $pbi       = [System.Collections.Generic.List[object]]::new()   # one row per semantic model: its last refresh
