@@ -222,7 +222,7 @@ foreach ($c in $clients) {
             }
         }
         Write-Host "$($c.Name): Power Apps, $(@($apps | Where-Object Client -eq $c.Name).Count) app(s), $(@($conns | Where-Object Client -eq $c.Name).Count) connection(s)$scopeNote"
-    } catch { $failures += "$($c.Name): Power Apps collection failed: $(& $why $_.Exception)" }
+    } catch { $failures += "$($c.Name): Power Apps collection failed: $(& $why $_.Exception)"; Write-Host (& $tlsProbe 'api.powerapps.com') }
 }
 
 # Helpdesk: the Odoo tickets in the "In Progress" stage. One Odoo database for all clients, so collected once, from the cloud job only
