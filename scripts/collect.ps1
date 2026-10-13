@@ -43,7 +43,7 @@ $tlsProbe = { param($hostName)
     $more = try {
         # Rebuild the chain at verification times 0..6 h ahead of UTC in 30-min steps: the first that passes measures how far behind the host checks.
         $build = { param($t) $x = [Security.Cryptography.X509Certificates.X509Chain]::new(); $x.ChainPolicy.RevocationMode = 'NoCheck'; $x.ChainPolicy.ExtraStore.AddRange($info.extra); $x.ChainPolicy.VerificationTime = $t; if ($x.Build($info.cert)) { 'ok' } else { $x.ChainStatus.Status -join ',' } }.GetNewClosure()
-        $steps = (foreach ($m in 0..12) { "+$($m * 30)m=$(& $build ([datetime]::UtcNow.AddMinutes($m * 30)))" }) -join ' '
+        $steps = @(foreach ($m in 0..12) { "+$($m * 30)m=$(& $build ([datetime]::UtcNow.AddMinutes($m * 30)))" }) -join ' '
         # Same build with the process time zone switched to UTC: does the local offset drive it?
         $savedTz = $env:TZ; $env:TZ = 'UTC'; [TimeZoneInfo]::ClearCachedData(); $asUtc = "TZ=UTC local=$([datetime]::Now.ToString('u')) build=$(& $build ([datetime]::UtcNow))"; $env:TZ = $savedTz; [TimeZoneInfo]::ClearCachedData()
         # And OpenSSL's own verdict, plus the OS clock.
