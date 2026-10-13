@@ -31,6 +31,15 @@ $collected = [TimeZoneInfo]::ConvertTimeFromUtc($nowUtc, $tz).ToString('s')
 $since     = $nowUtc.AddDays(-$Days)
 $out       = Join-Path (Split-Path $PSScriptRoot) 'out'; New-Item -ItemType Directory -Force $out | Out-Null   # everything generated lives in out/
 $why       = { param($e) $m = @(); while ($e) { $m += $e.Message; $e = $e.InnerException }; $m -join ' <- ' }   # the whole exception chain: "SSL connection could not be established" alone says nothing
+# ponytail: diagnostic for the 2026-10-13 NotTimeValid failures, remove once understood
+$tlsProbe = { param($hostName)
+    $info = @{ text = '' }
+    $cb = { param($s, $cert, $chain, $errors)
+        $info.text = "errors=$errors; " + (($chain.ChainElements | ForEach-Object { "$($_.Certificate.Subject -replace ',.*') [$($_.Certificate.NotBefore.ToUniversalTime().ToString('u')) .. $($_.Certificate.NotAfter.ToUniversalTime().ToString('u'))] $($_.Certificate.Thumbprint.Substring(0,8)) status=$(($_.ChainElementStatus.Status -join ',') -replace '^$','ok')" }) -join ' | ')
+        $true }.GetNewClosure()
+    try { $tcp = [Net.Sockets.TcpClient]::new($hostName, 443); $ssl = [Net.Security.SslStream]::new($tcp.GetStream(), $false, $cb); $ssl.AuthenticateAsClient($hostName); $ssl.Dispose(); $tcp.Dispose() } catch { $info.text += " probe error: $($_.Exception.Message)" }
+    "TLS probe $hostName -> $([Net.Dns]::GetHostAddresses($hostName).IPAddressToString -join ',') at utc=$([datetime]::UtcNow.ToString('u')) local=$([datetime]::Now.ToString('u')) tz=$([TimeZoneInfo]::Local.Id): $($info.text)"
+}
 $rows      = [System.Collections.Generic.List[object]]::new()
 $pbi       = [System.Collections.Generic.List[object]]::new()   # one row per semantic model: its last refresh
 $pbiRuns   = [System.Collections.Generic.List[object]]::new()   # one row per Power BI refresh in the window: the tab's recap and the weekly mail (same shape as flow runs)
@@ -151,7 +160,7 @@ foreach ($c in $clients) {
                 }
             }
             Write-Host "$($c.Name): Power BI, $(@($pbi | Where-Object Client -eq $c.Name).Count) model(s) in $($groups.Count) workspace(s)"
-        } catch { $failures += "$($c.Name): Power BI collection failed: $(& $why $_.Exception)" }
+        } catch { $failures += "$($c.Name): Power BI collection failed: $(& $why $_.Exception)"; Write-Host (& $tlsProbe 'api.powerbi.com') }
     }
 
     # Power Apps: canvas apps and connections of the listed environments. The admin scope lists everything in the environment
