@@ -8,7 +8,7 @@
 # and nobody on the team has access to the Mailgun account the SPF record authorises). Secrets:
 #   SMTP_USER      the sending account, also the From address, e.g. a Workspace user with an app password
 #   SMTP_PASSWORD  its app password (Google: 2-Step Verification must be on, myaccount.google.com/apppasswords)
-#   MAIL_TO        recipient(s), comma-separated
+#   MAIL_TO        recipient(s), separated by commas or semicolons
 #   SMTP_HOST      optional, default smtp.gmail.com (Mailgun would be smtp.mailgun.org); port 587 with STARTTLS
 # -DryRun prints the emails instead of sending and leaves alerts.json untouched.
 # -Sample marks one real flow per client as failed and sends only that alert, prefixed [Sample], without saving state:
@@ -127,7 +127,7 @@ if ($mails) {
     $cred = [pscredential]::new($env:SMTP_USER, (ConvertTo-SecureString $env:SMTP_PASSWORD -AsPlainText -Force))
     foreach ($mail in $mails) {
         # Send-MailMessage is marked obsolete but still ships in PowerShell 7 and does STARTTLS on 587; enough for a few mails a day.
-        Send-MailMessage -SmtpServer $smtpHost -Port 587 -UseSsl -Credential $cred -From "Support Watch <$($env:SMTP_USER)>" -To ($env:MAIL_TO -split ',\s*') -Subject $mail.subject -Body $mail.body -BodyAsHtml -Encoding UTF8 -WarningAction SilentlyContinue
+        Send-MailMessage -SmtpServer $smtpHost -Port 587 -UseSsl -Credential $cred -From "Support Watch <$($env:SMTP_USER)>" -To ($env:MAIL_TO -split '[,;]\s*' | Where-Object { $_ }) -Subject $mail.subject -Body $mail.body -BodyAsHtml -Encoding UTF8 -WarningAction SilentlyContinue
         Write-Host "Sent: $($mail.subject)"
     }
 }
