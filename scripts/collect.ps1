@@ -98,7 +98,7 @@ foreach ($c in $clients) {
     Write-Host "$($c.Name): signed in, $($envs.Count) environment(s) found"   # progress marks: a run killed by the function's 10-min limit then shows where it stalled
 
     foreach ($env in $envs) {
-        $flows = @(Get-All "$api/environments/$($env['name'])/flows?$ver" $h)
+        $flows = @(Get-All "$api/environments/$($env['name'])/flows?$ver&include=includeSolutionCloudFlows" $h)   # without include=, flows that live in a Dataverse solution are left out even when the account co-owns them
         Write-Host "$($c.Name): $($env['properties']['displayName']): $($flows.Count) flows listed, reading runs"
         # One runs request per flow, in parallel. Runs come newest first: stop paging once a page ends before the window.
         # The Flow API returns 503/504 timeouts now and then; without retries the flow lost all its runs for that build and showed UNREADABLE.
