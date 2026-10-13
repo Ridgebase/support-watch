@@ -33,25 +33,23 @@ $out       = Join-Path (Split-Path $PSScriptRoot) 'out'; New-Item -ItemType Dire
 $why       = { param($e) $m = @(); while ($e) { $m += $e.Message; $e = $e.InnerException }; $m -join ' <- ' }   # the whole exception chain: "SSL connection could not be established" alone says nothing
 # ponytail: diagnostic for the 2026-10-13 NotTimeValid failures, remove once understood
 $tlsProbe = { param($hostName)
-    $info = @{ text = ''; cert = $null; extra = $null }
+    $info = @{ text = '' }
     $cb = { param($s, $cert, $chain, $errors)
-        $extra = [Security.Cryptography.X509Certificates.X509Certificate2Collection]::new(); foreach ($e in $chain.ChainElements) { $null = $extra.Add($e.Certificate) }
-        $info.cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($cert); $info.extra = $extra
-        $info.text = "errors=$errors; chain: " + (($chain.ChainElements | ForEach-Object { "$($_.Certificate.Subject -replace ',.*') [$($_.Certificate.NotBefore.ToUniversalTime().ToString('u')) .. $($_.Certificate.NotAfter.ToUniversalTime().ToString('u'))] $($_.Certificate.Thumbprint.Substring(0,8)) status=$(($_.ChainElementStatus.Status -join ',') -replace '^$','ok')" }) -join ' | ')
+        try {
+            $extra = [Security.Cryptography.X509Certificates.X509Certificate2Collection]::new(); foreach ($e in $chain.ChainElements) { $null = $extra.Add($e.Certificate) }
+            $build = { param($t) $x = [Security.Cryptography.X509Certificates.X509Chain]::new(); $x.ChainPolicy.RevocationMode = 'NoCheck'; $x.ChainPolicy.ExtraStore.AddRange($extra); $x.ChainPolicy.VerificationTime = $t; if ($x.Build($cert)) { 'ok' } else { $x.ChainStatus.Status -join ',' } }
+            # Rebuild the chain at verification times 0..6 h ahead of UTC in 30-min steps: the first that passes measures how far behind the host checks.
+            $steps = @(foreach ($m in 0..12) { "+$($m * 30)m=$(& $build ([datetime]::UtcNow.AddMinutes($m * 30)))" }) -join ' '
+            # Same build with the process time zone switched to UTC: does the local offset drive it?
+            $savedTz = $env:TZ; $env:TZ = 'UTC'; [TimeZoneInfo]::ClearCachedData(); $asUtc = "TZ=UTC local=$([datetime]::Now.ToString('u')) build=$(& $build ([datetime]::UtcNow))"; $env:TZ = $savedTz; [TimeZoneInfo]::ClearCachedData()
+            $info.text = "errors=$errors; steps: $steps; $asUtc; chain: " + (($chain.ChainElements | ForEach-Object { "$($_.Certificate.Subject -replace ',.*') [$($_.Certificate.NotBefore.ToUniversalTime().ToString('u')) .. $($_.Certificate.NotAfter.ToUniversalTime().ToString('u'))] $($_.Certificate.Thumbprint.Substring(0,8)) status=$(($_.ChainElementStatus.Status -join ',') -replace '^$','ok')" }) -join ' | ')
+        } catch { $info.text = "callback failed: $_" }
         $true }.GetNewClosure()
     try { $tcp = [Net.Sockets.TcpClient]::new($hostName, 443); $ssl = [Net.Security.SslStream]::new($tcp.GetStream(), $false, $cb); $ssl.AuthenticateAsClient($hostName); $ssl.Dispose(); $tcp.Dispose() } catch { $info.text += " probe error: $($_.Exception.Message)" }
-    $more = try {
-        # Rebuild the chain at verification times 0..6 h ahead of UTC in 30-min steps: the first that passes measures how far behind the host checks.
-        $build = { param($t) $x = [Security.Cryptography.X509Certificates.X509Chain]::new(); $x.ChainPolicy.RevocationMode = 'NoCheck'; $x.ChainPolicy.ExtraStore.AddRange($info.extra); $x.ChainPolicy.VerificationTime = $t; if ($x.Build($info.cert)) { 'ok' } else { $x.ChainStatus.Status -join ',' } }.GetNewClosure()
-        $steps = @(foreach ($m in 0..12) { "+$($m * 30)m=$(& $build ([datetime]::UtcNow.AddMinutes($m * 30)))" }) -join ' '
-        # Same build with the process time zone switched to UTC: does the local offset drive it?
-        $savedTz = $env:TZ; $env:TZ = 'UTC'; [TimeZoneInfo]::ClearCachedData(); $asUtc = "TZ=UTC local=$([datetime]::Now.ToString('u')) build=$(& $build ([datetime]::UtcNow))"; $env:TZ = $savedTz; [TimeZoneInfo]::ClearCachedData()
-        # And OpenSSL's own verdict, plus the OS clock.
-        $cli = try { (& sh -c "echo | openssl s_client -connect ${hostName}:443 -servername $hostName 2>&1 | grep -E 'Verify return|error'; echo os-date=`$(date -u +%FT%TZ)") -join ' ; ' } catch { "cli: $_" }
-        "steps: $steps; $asUtc; openssl-cli: $cli"
-    } catch { "more failed: $_" }
+    # OpenSSL's own verdict, plus the OS clock.
+    $cli = try { (& sh -c "echo | openssl s_client -connect ${hostName}:443 -servername $hostName 2>&1 | grep -E 'Verify return|error'; echo os-date=`$(date -u +%FT%TZ)") -join ' ; ' } catch { "cli: $_" }
     $os = try { (Get-Content /etc/os-release -First 1 -ErrorAction Stop) } catch { 'windows' }; $ossl = try { & openssl version 2>$null } catch { '' }
-    "TLS probe $hostName -> $([Net.Dns]::GetHostAddresses($hostName).IPAddressToString -join ',') at utc=$([datetime]::UtcNow.ToString('u')) local=$([datetime]::Now.ToString('u')) tz=$([TimeZoneInfo]::Local.Id) $os $ossl $([Runtime.InteropServices.RuntimeInformation]::FrameworkDescription): $($info.text); $more"
+    "TLS probe $hostName -> $([Net.Dns]::GetHostAddresses($hostName).IPAddressToString -join ',') at utc=$([datetime]::UtcNow.ToString('u')) local=$([datetime]::Now.ToString('u')) tz=$([TimeZoneInfo]::Local.Id) $os $ossl $([Runtime.InteropServices.RuntimeInformation]::FrameworkDescription): $($info.text); openssl-cli: $cli"
 }
 $rows      = [System.Collections.Generic.List[object]]::new()
 $pbi       = [System.Collections.Generic.List[object]]::new()   # one row per semantic model: its last refresh
