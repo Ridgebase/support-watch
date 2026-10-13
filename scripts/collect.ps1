@@ -31,26 +31,6 @@ $collected = [TimeZoneInfo]::ConvertTimeFromUtc($nowUtc, $tz).ToString('s')
 $since     = $nowUtc.AddDays(-$Days)
 $out       = Join-Path (Split-Path $PSScriptRoot) 'out'; New-Item -ItemType Directory -Force $out | Out-Null   # everything generated lives in out/
 $why       = { param($e) $m = @(); while ($e) { $m += $e.Message; $e = $e.InnerException }; $m -join ' <- ' }   # the whole exception chain: "SSL connection could not be established" alone says nothing
-# ponytail: diagnostic for the 2026-10-13 NotTimeValid failures, remove once understood
-$tlsProbe = { param($hostName)
-    $info = @{ text = '' }
-    $cb = { param($s, $cert, $chain, $errors)
-        try {
-            $extra = [Security.Cryptography.X509Certificates.X509Certificate2Collection]::new(); foreach ($e in $chain.ChainElements) { $null = $extra.Add($e.Certificate) }
-            $build = { param($t) $x = [Security.Cryptography.X509Certificates.X509Chain]::new(); $x.ChainPolicy.RevocationMode = 'NoCheck'; $x.ChainPolicy.ExtraStore.AddRange($extra); $x.ChainPolicy.VerificationTime = $t; if ($x.Build($cert)) { 'ok' } else { $x.ChainStatus.Status -join ',' } }
-            # Rebuild the chain at verification times 0..6 h ahead of UTC in 30-min steps: the first that passes measures how far behind the host checks.
-            $steps = @(foreach ($m in 0..12) { "+$($m * 30)m=$(& $build ([datetime]::UtcNow.AddMinutes($m * 30)))" }) -join ' '
-            # Same build with the process time zone switched to UTC: does the local offset drive it?
-            $savedTz = $env:TZ; $env:TZ = 'UTC'; [TimeZoneInfo]::ClearCachedData(); $asUtc = "TZ=UTC local=$([datetime]::Now.ToString('u')) build=$(& $build ([datetime]::UtcNow))"; $env:TZ = $savedTz; [TimeZoneInfo]::ClearCachedData()
-            $info.text = "errors=$errors; steps: $steps; $asUtc; chain: " + (($chain.ChainElements | ForEach-Object { "$($_.Certificate.Subject -replace ',.*') [$($_.Certificate.NotBefore.ToUniversalTime().ToString('u')) .. $($_.Certificate.NotAfter.ToUniversalTime().ToString('u'))] $($_.Certificate.Thumbprint.Substring(0,8)) status=$(($_.ChainElementStatus.Status -join ',') -replace '^$','ok')" }) -join ' | ')
-        } catch { $info.text = "callback failed: $_" }
-        $true }.GetNewClosure()
-    try { $tcp = [Net.Sockets.TcpClient]::new($hostName, 443); $ssl = [Net.Security.SslStream]::new($tcp.GetStream(), $false, $cb); $ssl.AuthenticateAsClient($hostName); $ssl.Dispose(); $tcp.Dispose() } catch { $info.text += " probe error: $($_.Exception.Message)" }
-    # OpenSSL's own verdict, plus the OS clock.
-    $cli = try { (& sh -c "echo | openssl s_client -connect ${hostName}:443 -servername $hostName 2>&1 | grep -E 'Verify return|error'; echo os-date=`$(date -u +%FT%TZ)") -join ' ; ' } catch { "cli: $_" }
-    $os = try { (Get-Content /etc/os-release -First 1 -ErrorAction Stop) } catch { 'windows' }; $ossl = try { & openssl version 2>$null } catch { '' }
-    "TLS probe $hostName -> $([Net.Dns]::GetHostAddresses($hostName).IPAddressToString -join ',') at utc=$([datetime]::UtcNow.ToString('u')) local=$([datetime]::Now.ToString('u')) tz=$([TimeZoneInfo]::Local.Id) $os $ossl $([Runtime.InteropServices.RuntimeInformation]::FrameworkDescription): $($info.text); openssl-cli: $cli"
-}
 $rows      = [System.Collections.Generic.List[object]]::new()
 $pbi       = [System.Collections.Generic.List[object]]::new()   # one row per semantic model: its last refresh
 $pbiRuns   = [System.Collections.Generic.List[object]]::new()   # one row per Power BI refresh in the window: the tab's recap and the weekly mail (same shape as flow runs)
@@ -98,7 +78,7 @@ foreach ($c in $clients) {
     Write-Host "$($c.Name): signed in, $($envs.Count) environment(s) found"   # progress marks: a run killed by the function's 10-min limit then shows where it stalled
 
     foreach ($env in $envs) {
-        $flows = @(Get-All "$api/environments/$($env['name'])/flows?$ver&include=includeSolutionCloudFlows" $h)   # without include=, flows that live in a Dataverse solution are left out even when the account co-owns them
+        $flows = @(Get-All "$api/environments/$($env['name'])/flows?$ver" $h)
         Write-Host "$($c.Name): $($env['properties']['displayName']): $($flows.Count) flows listed, reading runs"
         # One runs request per flow, in parallel. Runs come newest first: stop paging once a page ends before the window.
         # The Flow API returns 503/504 timeouts now and then; without retries the flow lost all its runs for that build and showed UNREADABLE.
@@ -171,7 +151,7 @@ foreach ($c in $clients) {
                 }
             }
             Write-Host "$($c.Name): Power BI, $(@($pbi | Where-Object Client -eq $c.Name).Count) model(s) in $($groups.Count) workspace(s)"
-        } catch { $failures += "$($c.Name): Power BI collection failed: $(& $why $_.Exception)"; Write-Host (& $tlsProbe 'api.powerbi.com') }
+        } catch { $failures += "$($c.Name): Power BI collection failed: $(& $why $_.Exception)" }
     }
 
     # Power Apps: canvas apps and connections of the listed environments. The admin scope lists everything in the environment
@@ -222,7 +202,7 @@ foreach ($c in $clients) {
             }
         }
         Write-Host "$($c.Name): Power Apps, $(@($apps | Where-Object Client -eq $c.Name).Count) app(s), $(@($conns | Where-Object Client -eq $c.Name).Count) connection(s)$scopeNote"
-    } catch { $failures += "$($c.Name): Power Apps collection failed: $(& $why $_.Exception)"; Write-Host (& $tlsProbe 'api.powerapps.com') }
+    } catch { $failures += "$($c.Name): Power Apps collection failed: $(& $why $_.Exception)" }
 }
 
 # Helpdesk: the Odoo tickets in the "In Progress" stage. One Odoo database for all clients, so collected once, from the cloud job only
