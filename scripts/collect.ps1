@@ -30,6 +30,7 @@ $nowUtc    = [datetime]::UtcNow
 $collected = [TimeZoneInfo]::ConvertTimeFromUtc($nowUtc, $tz).ToString('s')
 $since     = $nowUtc.AddDays(-$Days)
 $out       = Join-Path (Split-Path $PSScriptRoot) 'out'; New-Item -ItemType Directory -Force $out | Out-Null   # everything generated lives in out/
+$why       = { param($e) $m = @(); while ($e) { $m += $e.Message; $e = $e.InnerException }; $m -join ' <- ' }   # the whole exception chain: "SSL connection could not be established" alone says nothing
 $rows      = [System.Collections.Generic.List[object]]::new()
 $pbi       = [System.Collections.Generic.List[object]]::new()   # one row per semantic model: its last refresh
 $pbiRuns   = [System.Collections.Generic.List[object]]::new()   # one row per Power BI refresh in the window: the tab's recap and the weekly mail (same shape as flow runs)
@@ -110,7 +111,7 @@ foreach ($c in $clients) {
         }
     }
     } catch {
-        $failures += "$($c.Name): flow collection failed: $($_.Exception.Message)"; $blocked += $c.Name
+        $failures += "$($c.Name): flow collection failed: $(& $why $_.Exception)"; $blocked += $c.Name
         $rows.RemoveAll({ param($r) $r.Client -eq $c.Name }) | Out-Null   # a half-collected client would double up with its carry-over
         continue
     }
@@ -150,7 +151,7 @@ foreach ($c in $clients) {
                 }
             }
             Write-Host "$($c.Name): Power BI, $(@($pbi | Where-Object Client -eq $c.Name).Count) model(s) in $($groups.Count) workspace(s)"
-        } catch { $failures += "$($c.Name): Power BI collection failed: $($_.Exception.Message)" }
+        } catch { $failures += "$($c.Name): Power BI collection failed: $(& $why $_.Exception)" }
     }
 
     # Power Apps: canvas apps and connections of the listed environments. The admin scope lists everything in the environment
@@ -201,7 +202,7 @@ foreach ($c in $clients) {
             }
         }
         Write-Host "$($c.Name): Power Apps, $(@($apps | Where-Object Client -eq $c.Name).Count) app(s), $(@($conns | Where-Object Client -eq $c.Name).Count) connection(s)$scopeNote"
-    } catch { $failures += "$($c.Name): Power Apps collection failed: $($_.Exception.Message)" }
+    } catch { $failures += "$($c.Name): Power Apps collection failed: $(& $why $_.Exception)" }
 }
 
 # Helpdesk: the Odoo tickets in the "In Progress" stage. One Odoo database for all clients, so collected once, from the cloud job only
@@ -234,7 +235,7 @@ if ($env:ODOO_URL -and $env:ODOO_KEY) {
         }
         $helpdeskAt = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s')
         Write-Host "Helpdesk: $($tickets.Count) ticket(s) in progress"
-    } catch { $failures += "Helpdesk collection failed: $($_.Exception.Message)" }
+    } catch { $failures += "Helpdesk collection failed: $(& $why $_.Exception)" }
 }
 # Carry-over: a client that could not be signed in from here is taken from CARRY_URL, a data.json that the laptop
 # collector (flow-runs.ps1) publishes to a gist whenever it runs. Its snapshot time is kept, so the page shows STALE
