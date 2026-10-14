@@ -293,7 +293,7 @@ function render() {
   h += '</tbody></table></div>';
 
   // One row per flow and error, newest first, with the number of runs: a flow failing every 30 min for a day is one line, not 48.
-  // Only a flow's 5 newest failed runs get the failed action's error (collect.ps1); the rest keep the run's generic banner and group as "not inspected".
+  // Only a flow's 30 newest failed runs get the failed action's error (collect.ps1); the rest keep the run's generic banner and group as "not inspected".
   const groups = new Map();
   for (const r of data.fails.filter(r => !client || r.Client === client).sort((a, b) => b.Start.localeCompare(a.Start))) {
     const k = [r.Client, r.Environment, r.Flow, r.Error || ''].join(' '), g = groups.get(k);
@@ -305,7 +305,7 @@ function render() {
     // Failed-run rows carry no flow id: take the URL from the matching flow in the summary; with the run id the copy button copies the newest failed run's URL (no link: the clients live in other browser profiles).
     const urlOf = r => (summary.find(f => f.client === r.Client && f.env === r.Environment && f.flow === r.Flow) || {}).url;
     const runUrl = r => { const u = urlOf(r); return u && r.RunId ? `${u.replace(/\/details$/, '')}/runs/${r.RunId}` : u; };
-    const errCell = r => /^ActionFailed: /.test(r.Error || '') ? `<span class="muted" title="Only a flow's 5 newest failed runs are inspected for the failed action's error; these are older, or their actions could not be read.">not inspected</span>` : esc(r.Error || '');
+    const errCell = r => /^ActionFailed: /.test(r.Error || '') ? `<span class="muted" title="Only a flow's 30 newest failed runs are inspected for the failed action's error; these are older, or their actions could not be read.">not inspected</span>` : esc(r.Error || '');
     for (const r of fails) h += `<tr><td title="${r.n > 1 ? `First: ${fmt(r.first)}` : ''}">${fmt(r.Start)}</td><td>${esc(r.Client)}</td><td>${esc(r.Environment)}</td><td class="flow">${esc(r.Flow)}${copyBtn(runUrl(r))}</td><td class="num">${r.n}</td><td class="text">${errCell(r)}</td></tr>`;
     h += '</tbody></table></div>';
   }

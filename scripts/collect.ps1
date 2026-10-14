@@ -130,9 +130,9 @@ foreach ($c in $clients) {
             $base = @{ Flow = $flow['properties']['displayName']; FlowId = $flow['name']; Enabled = ($flow['properties']['state'] -eq 'Started'); Trigger = $tr }
             if ($status)             { [pscustomobject]($base + @{ Start = ''; Status = $status }) }
             elseif ($runs.Count -eq 0) { [pscustomobject]($base + @{ Start = ''; Status = 'NO_RUNS' }) }
-            else { $nf = 0; foreach ($run in $runs) {   # runs come newest first: the 5 newest failed runs get the action-level error, older ones the run's banner
+            else { $nf = 0; foreach ($run in $runs) {   # runs come newest first: the 30 newest failed runs get the action-level error, older ones the run's banner
                 $e = & $err $run['properties']['error']
-                if ($run['properties']['status'] -eq 'Failed' -and $nf++ -lt 5) { $a = & $actErr $run['name']; if ($a) { $e = $a } }
+                if ($run['properties']['status'] -eq 'Failed' -and $nf++ -lt 30) { $a = & $actErr $run['name']; if ($a) { $e = $a } }
                 [pscustomobject]($base + @{ Start = [TimeZoneInfo]::ConvertTimeFromUtc((& $utc $run['properties']['startTime']), $tz).ToString('s'); Status = $run['properties']['status']; RunId = $run['name']; Error = $e }) } }
         }
         foreach ($fr in $flowRows) {
