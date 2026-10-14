@@ -23,8 +23,9 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
 
 - `collect.ps1` signs in to each client tenant with a **refresh token**, reads flows and their runs for the
   configured environments through the Flow REST API, and writes `out/flow-runs.csv`.
-- `build-dashboard.ps1` aggregates that CSV into `out/site/data.json` (per-flow and per-day totals, failed runs with their error
-  text and run id; ~40 KB instead of every run) and renders `out/site/index.html` from `dashboard.template.html`. It also flags
+- `build-dashboard.ps1` aggregates that CSV into `out/site/data.json` (per-flow and per-day totals, failed runs with their run id and
+  error text: the failed action's name, code and connector message for a flow's 5 newest failed runs, read with two extra calls
+  each, the run's generic banner for older ones; ~40 KB instead of every run) and renders `out/site/index.html` from `dashboard.template.html`. It also flags
   **silent** flows: an enabled recurrence flow whose last run is older than 1.5x the longest gap between two of its runs this week
   (3 runs needed), i.e. a schedule that stopped without failing. A flow with no weekend run is measured in weekday time, so a
   weekday schedule is not silent over the weekend. Yellow on the page, counted in "needing attention", emailed once.

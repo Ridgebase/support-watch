@@ -86,8 +86,30 @@ foreach ($c in $clients) {
             $flow = $_; $api = $using:api; $ver = $using:ver; $h = $using:h; $since = $using:since; $tz = $using:tz; $envId = ($using:env)['name']
             $fd = ($using:c).FlowDays; $fdName = $flow['properties']['displayName']; if ($fd -and $fd.$fdName) { $since = ($using:nowUtc).AddDays(-$fd.$fdName) }
             $utc = { param($s) [datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
-            # A failed run's error as the API reports it, "code: message" (e.g. "ActionFailed: An action failed. No dependent actions succeeded."), one line, capped.
-            $err = { param($e) if (-not $e) { return '' }; $m = "$($e['code']): $($e['message'])".Trim(': ') -replace '\s+', ' '; if ($m.Length -gt 400) { $m.Substring(0, 400) + '...' } else { $m } }
+            $cap = { param($m) $m = "$m".Trim(': ') -replace '\s+', ' '; if ($m.Length -gt 400) { $m.Substring(0, 400) + '...' } else { $m } }
+            # A failed run's own error is the same banner nearly every time ("ActionFailed: An action failed. No dependent actions succeeded."), so
+            # the newest failed runs of the flow get two more calls each: the run's actions, where the failed leaf names what broke, then that
+            # leaf's outputs (a short-lived blob URL in outputsLink, no auth), whose body carries the connector's message:
+            # "List files: BadRequest - Check your request parameters to make sure the path '' exists on your file system."
+            # Containers (Scope, Apply to each, Condition) fail with ActionFailed because a child did, so the leaves are the failed actions
+            # with another code; a failure inside a loop iteration shows only its container.
+            $err = { param($e) if ($e) { & $cap "$($e['code']): $($e['message'])" } else { '' } }
+            $outMsg = { param($uri) try {
+                    $b = (((Invoke-WebRequest -Uri $uri -TimeoutSec 15).Content | ConvertFrom-Json -AsHashtable))['body']
+                    $m = if ($b -is [hashtable]) { if ($b['error'] -is [hashtable] -and $b['error']['message']) { $b['error']['message'] } elseif ($b['message']) { $b['message'] } else { $b | ConvertTo-Json -Compress -Depth 3 } } else { "$b" }
+                    ($m -replace '(?i)\s*(clientRequestId|CorrelationId):\s*\S+', '').Trim()   # request ids are noise in a one-line summary
+                } catch { '' } }
+            $actErr = { param($runName)
+                try {
+                    $acts = ((Invoke-WebRequest -Uri "$api/environments/$envId/flows/$($flow['name'])/runs/$runName/actions?$ver" -Headers $h -MaximumRetryCount 2 -RetryIntervalSec 3 -TimeoutSec 30).Content | ConvertFrom-Json -AsHashtable)['value']
+                    $failed = @($acts | Where-Object { $_['properties']['status'] -eq 'Failed' })
+                    $leaves = @($failed | Where-Object { $_['properties']['code'] -ne 'ActionFailed' }); if (-not $leaves) { $leaves = $failed }
+                    $parts = @($leaves | Select-Object -First 2 | ForEach-Object { $e = $_['properties']['error']; "$($_['name'] -replace '_', ' '): $(if ($e -and $e['message'] -and $e['code'] -ne 'ActionFailed') { $e['message'] } else { $_['properties']['code'] })" })
+                    $uri = try { $leaves[0]['properties']['outputsLink']['uri'] } catch { $null }
+                    if ($parts -and $uri) { $m = & $outMsg $uri; if ($m) { $parts[0] += " - $m" } }
+                    & $cap ($parts -join '; ')
+                } catch { '' }
+            }
             $start = "$api/environments/$envId/flows/$($flow['name'])/runs?$ver"; $runs = @(); $status = $null
             # A timeout throws (-MaximumRetryCount only covers HTTP error codes), so a flow gets a second full attempt before it is UNREADABLE.
             foreach ($attempt in 1, 2) {
@@ -106,7 +128,10 @@ foreach ($c in $clients) {
             $base = @{ Flow = $flow['properties']['displayName']; FlowId = $flow['name']; Enabled = ($flow['properties']['state'] -eq 'Started'); Trigger = $tr }
             if ($status)             { [pscustomobject]($base + @{ Start = ''; Status = $status }) }
             elseif ($runs.Count -eq 0) { [pscustomobject]($base + @{ Start = ''; Status = 'NO_RUNS' }) }
-            else { foreach ($run in $runs) { [pscustomobject]($base + @{ Start = [TimeZoneInfo]::ConvertTimeFromUtc((& $utc $run['properties']['startTime']), $tz).ToString('s'); Status = $run['properties']['status']; RunId = $run['name']; Error = (& $err $run['properties']['error']) }) } }
+            else { $nf = 0; foreach ($run in $runs) {   # runs come newest first: the 5 newest failed runs get the action-level error, older ones the run's banner
+                $e = & $err $run['properties']['error']
+                if ($run['properties']['status'] -eq 'Failed' -and $nf++ -lt 5) { $a = & $actErr $run['name']; if ($a) { $e = $a } }
+                [pscustomobject]($base + @{ Start = [TimeZoneInfo]::ConvertTimeFromUtc((& $utc $run['properties']['startTime']), $tz).ToString('s'); Status = $run['properties']['status']; RunId = $run['name']; Error = $e }) } }
         }
         foreach ($fr in $flowRows) {
             $rows.Add([pscustomobject]@{ Collected = $collected; Client = $c.Name; Environment = $env['properties']['displayName']; EnvironmentId = $env['name']; Flow = $fr.Flow; FlowId = $fr.FlowId; Enabled = $fr.Enabled; Trigger = $fr.Trigger; Start = $fr.Start; Status = $fr.Status; RunId = "$($fr.RunId)"; Error = "$($fr.Error)" })
