@@ -96,10 +96,15 @@ foreach ($c in $clients) {
             $err = { param($e) if ($e) { & $cap "$($e['code']): $($e['message'])" } else { '' } }
             $outMsg = { param($uri) try {
                     $b = (((Invoke-WebRequest -Uri $uri -TimeoutSec 15).Content | ConvertFrom-Json -AsHashtable))['body']
-                    # Connectors disagree on the key's case (message / Message); an HTML body (a gateway's 503 page) is kept as its text, tags stripped.
-                    $pick = { param($h, $k) if ($h -is [hashtable]) { foreach ($n in $h.Keys) { if ($n -ieq $k) { return $h[$n] } } } }
-                    $m = if ($b -is [hashtable]) { $x = "$(& $pick (& $pick $b 'error') 'message')"; if (-not $x) { $x = "$(& $pick $b 'message')" }; if (-not $x) { $x = $b | ConvertTo-Json -Compress -Depth 3 }; $x } elseif ("$b".TrimStart() -notlike '<*') { "$b" } else { ("$b" -replace '(?is)<(script|style).*?</>', '' -replace '<[^>]+>', ' ' -replace '&nbsp;', ' ') }   # an HTML error page, as its text
-                    "$m".Trim()   # kept whole, request ids included: the user wants the entire message
+                    # A JSON body holds the cause under message / Message / ExceptionMessage / error.message / InnerException..., in no fixed shape: every message-like
+                    # field is collected, outermost first ("An error has occurred. - Valeur non valide pour le champ Numero ..."); stack traces are skipped.
+                    # An HTML body (a gateway's 503 page) is kept as its text. Correlation and request ids are dropped so identical errors group on the page.
+                    $msgs = [System.Collections.Generic.List[string]]::new()
+                    $idRx = '(?i)\s*(clientRequestId|CorrelationId)\s*:\s*[0-9a-f-]{8,}\.?'
+                    $add = { param($v) $n = ($v -replace $idRx, '').Trim(); if (-not $n -or ($msgs | Where-Object { $_.Contains($n) })) { return }; foreach ($x in @($msgs | Where-Object { $n.Contains($_) })) { [void]$msgs.Remove($x) }; $msgs.Add($n) }   # ids off before comparing; a message already inside another is skipped
+                    $walk = { param($h, $depth) if ($depth -gt 4) { return }; if ($h -is [hashtable]) { foreach ($k in $h.Keys) { $v = $h[$k]; if ($k -match '^(message|exceptionmessage|error_description|description|detail|details|reason)$' -and $v -is [string]) { & $add $v } elseif ($v -is [hashtable] -or $v -is [array]) { & $walk $v ($depth + 1) } } } elseif ($h -is [array]) { foreach ($x in $h) { & $walk $x ($depth + 1) } } }
+                    $m = if ($b -is [hashtable] -or $b -is [array]) { & $walk $b 0; if ($msgs.Count) { $msgs -join ' - ' } else { $b | ConvertTo-Json -Compress -Depth 3 } } elseif ("$b".TrimStart() -notlike '<*') { "$b" } else { ("$b" -replace '(?is)<(script|style).*?</>', '' -replace '<[^>]+>', ' ' -replace '&nbsp;', ' ') }
+                    ($m -replace $idRx, '').Trim()
                 } catch { '' } }
             $actErr = { param($runName)
                 try {
