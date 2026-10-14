@@ -41,7 +41,7 @@ README.md says what the system is and how it runs. This file is what to know bef
 
 - Failed runs: the run's own error is always the same banner, so the collector reads the failed action and its outputs for a flow's
   30 newest failed runs (two extra API calls each); older ones keep the banner and the page groups them as "not inspected".
-- Stuck runs: a run still Running longer than twice the flow's longest finished run this week, floor 1 h; no finished run in the window, no flag.
+- Stuck runs: a run still Running after 2 h (`$stuckAfterMin` in build-dashboard.ps1). The user knows the flows: none legitimately takes that long.
 - Stale clients: notify.ps1 emails once per episode when a client's snapshot is over an hour old; "already announced" checks compare with the saved state ($prev), never with the state rebuilt for the run.
 - Silent flows: recurrence flows only, 1.5x the longest gap between runs this week, measured on a weekday clock when the flow never ran on
   a weekend. The flag lasts a week at most because the window is 7 days; a Monday holiday produces a false positive that afternoon.

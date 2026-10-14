@@ -64,13 +64,13 @@ $silent    = @($d.flows | Where-Object { "$($_.Silent)".ToLower() -eq 'true' -an
 $silentNew = @(if (-not $Sample -and -not $SampleDigest) { $silent | Where-Object { $k = "$($_.Client)|silent|$($_.FlowId)"; -not $prev.ContainsKey($k) -or (& $iso $_.Last) -gt (& $iso $prev[$k]) } })
 foreach ($f in $silent) { $open["$($f.Client)|silent|$($f.FlowId)"] = & $iso $f.Last }
 $sinceMin  = { param($f) ([datetime]$d.snapshots.$($f.Client) - [datetime]$f.Last).TotalMinutes }   # both Eastern, from data.json
-# Stuck runs (Stuck set by build-dashboard.ps1: a run still Running far longer than the flow's longest finished run this week). Announced once per
+# Stuck runs (Stuck set by build-dashboard.ps1: a run still Running after 2 h). Announced once per
 # stuck run (key value = its start); a flow whose last run failed is in the failure alert, but a stuck run is a separate thing and is still announced.
 $stuck    = @($d.flows | Where-Object { [int]$_.Stuck -gt 0 })
 $stuckNew = @(if (-not $Sample -and -not $SampleDigest) { $stuck | Where-Object { $k = "$($_.Client)|stuck|$($_.FlowId)"; -not $prev.ContainsKey($k) -or (& $iso $_.StuckSince) -gt (& $iso $prev[$k]) } })
 foreach ($f in $stuck) { $open["$($f.Client)|stuck|$($f.FlowId)"] = & $iso $f.StuckSince }
 $stuckUrl = { param($f) if ($f.StuckRun) { "https://make.powerautomate.com/environments/$($f.EnvironmentId)/flows/$($f.FlowId)/runs/$($f.StuckRun)" } else { & $url $f } }
-$stuckRow = { param($f) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>$(& $esc $f.Flow)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $f.Environment) &middot; $(if ([int]$f.Stuck -gt 1) { "$($f.Stuck) runs" } else { 'a run' }) still running since $(& $fmt $f.StuckSince) ($(& $every (([datetime]$d.snapshots.$($f.Client) - [datetime]$f.StuckSince).TotalMinutes))) &middot; longest finished run this week $(& $every $f.MaxDur)</span>" +
+$stuckRow = { param($f) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>$(& $esc $f.Flow)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $f.Environment) &middot; $(if ([int]$f.Stuck -gt 1) { "$($f.Stuck) runs" } else { 'a run' }) still running since $(& $fmt $f.StuckSince) ($(& $every (([datetime]$d.snapshots.$($f.Client) - [datetime]$f.StuckSince).TotalMinutes)))</span>" +
                           "<div style=""margin-top:6px;font:11px/1.4 Consolas,Menlo,monospace;color:$($col.muted);word-break:break-all"">$(& $stuckUrl $f)</div></td>" +
                           "<td style=""padding:10px 0 10px 12px;border-top:1px solid #e2e4e7;text-align:right;white-space:nowrap""><a href=""$(& $stuckUrl $f)"" style=""display:inline-block;padding:6px 12px;border-radius:4px;background:$($col.warn);color:#fff;text-decoration:none;font-size:12px;font-weight:600"">Open run</a></td></tr>" }
 if ($stuckNew) {
@@ -78,7 +78,7 @@ if ($stuckNew) {
         & $card "$($g.Name) $(& $pill "$($g.Count) stuck" $col.warn $col.warnbg)" "<table style=""width:100%;border-collapse:collapse"">$(($g.Group | ForEach-Object { & $stuckRow $_ }) -join '')</table>"
     }
     $mails += @{ subject = "[Support Watch] $(($stuckNew | Group-Object Client | ForEach-Object { "$($_.Name): $($_.Count) stuck" }) -join ', ')"
-                 body    = & $wrap 'A run has been running far longer than the flow ever takes: open it, and cancel or resubmit it' "$($stuckNew.Count) flow$(if ($stuckNew.Count -gt 1) { 's' }) with a stuck run" ($cards -join '') }
+                 body    = & $wrap 'A run has been running for over 2 hours: open it, and cancel or resubmit it' "$($stuckNew.Count) flow$(if ($stuckNew.Count -gt 1) { 's' }) with a stuck run" ($cards -join '') }
 }
 # Stale clients: no fresh snapshot for over an hour (sign-in refused, token revoked, collector down). Announced once per episode: the key's value is the
 # stale snapshot, so a client that recovers and goes stale again is announced again; a fresh snapshot drops the key.

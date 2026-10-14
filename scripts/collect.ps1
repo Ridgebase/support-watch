@@ -133,11 +133,10 @@ foreach ($c in $clients) {
             else { $nf = 0; foreach ($run in $runs) {   # runs come newest first: the 30 newest failed runs get the action-level error, older ones the run's banner
                 $e = & $err $run['properties']['error']
                 if ($run['properties']['status'] -eq 'Failed' -and $nf++ -lt 30) { $a = & $actErr $run['name']; if ($a) { $e = $a } }
-                [pscustomobject]($base + @{ Start = [TimeZoneInfo]::ConvertTimeFromUtc((& $utc $run['properties']['startTime']), $tz).ToString('s'); Status = $run['properties']['status']; RunId = $run['name']; Error = $e
-                    End = $(if ($run['properties']['endTime']) { [TimeZoneInfo]::ConvertTimeFromUtc((& $utc $run['properties']['endTime']), $tz).ToString('s') } else { '' }) }) } }   # '' while Running
+                [pscustomobject]($base + @{ Start = [TimeZoneInfo]::ConvertTimeFromUtc((& $utc $run['properties']['startTime']), $tz).ToString('s'); Status = $run['properties']['status']; RunId = $run['name']; Error = $e }) } }
         }
         foreach ($fr in $flowRows) {
-            $rows.Add([pscustomobject]@{ Collected = $collected; Client = $c.Name; Environment = $env['properties']['displayName']; EnvironmentId = $env['name']; Flow = $fr.Flow; FlowId = $fr.FlowId; Enabled = $fr.Enabled; Trigger = $fr.Trigger; Start = $fr.Start; Status = $fr.Status; RunId = "$($fr.RunId)"; Error = "$($fr.Error)"; End = "$($fr.End)" })
+            $rows.Add([pscustomobject]@{ Collected = $collected; Client = $c.Name; Environment = $env['properties']['displayName']; EnvironmentId = $env['name']; Flow = $fr.Flow; FlowId = $fr.FlowId; Enabled = $fr.Enabled; Trigger = $fr.Trigger; Start = $fr.Start; Status = $fr.Status; RunId = "$($fr.RunId)"; Error = "$($fr.Error)" })
         }
     }
     } catch {

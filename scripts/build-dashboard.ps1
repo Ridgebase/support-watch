@@ -23,6 +23,7 @@ $conns   = @(if (Test-Path $ConnCsv) { @(Import-Csv $ConnCsv) } else { @() })
 $tickets = @(if (Test-Path $TicketsCsv) { @(Import-Csv $TicketsCsv) } else { @() })   # Odoo Helpdesk tickets in progress, from collect.ps1 (cloud job only, never carried over)
 $pbiRuns = @(if (Test-Path $PbiRunsCsv) { @(Import-Csv $PbiRunsCsv) } else { @() })   # one row per Power BI refresh in the window, from collect.ps1
 $pbidays = @(); $pbifails = @()
+$stuckAfterMin = 120   # a run still Running after this is stuck (the user's call: no flow legitimately takes 2 h)
 # Weekday clock for silent-flow detection: minutes since 2000-01-03 (a Monday) with Saturdays and Sundays removed; a weekend instant counts as Friday midnight.
 $bizMin = { param([datetime]$d) $dow = [int]$d.DayOfWeek; $wk = [math]::Floor(($d.Date - [datetime]'2000-01-03').TotalDays / 7)
     $wd = if ($dow -in 0, 6) { 5 } else { $dow - 1 }; $tod = if ($dow -in 0, 6) { 0 } else { ($d - $d.Date).TotalMinutes }; ($wk * 5 + $wd) * 1440 + $tod }
@@ -59,18 +60,16 @@ foreach ($g in $rows | Group-Object Client) {
             for ($i = 1; $i -lt $starts.Count; $i++) { $gap = [math]::Max($gap, (& $clock $starts[$i]) - (& $clock $starts[$i - 1])) }; $gap = [math]::Round($gap, 1)
             $silent = $gap -gt 0 -and "$($f.Enabled)".ToLower() -ne 'false' -and ((& $clock ([datetime]$snapshots[$g.Name])) - (& $clock $starts[-1]) -gt 1.5 * $gap + 15)
         }
-        # Stuck runs: a run still Running for longer than twice the flow's longest finished run this week (floor 1 h): a flow that takes 10 s and has
-        # been running for 2 h is hung, while an approval flow whose runs take days is not. No finished run in the window = no baseline, not flagged.
-        $maxDur = 0.0; foreach ($r in $runs) { if ($r.End -and $r.Status -ne 'Running') { $maxDur = [math]::Max($maxDur, ([datetime]$r.End - [datetime]$r.Start).TotalMinutes) } }
+        # Stuck runs: still Running after $stuckAfterMin at snapshot time. The user knows the flows: none should take 2 h.
         $snapAt = [datetime]$snapshots[$g.Name]
-        $hung = @(if ($maxDur -gt 0) { $runs | Where-Object { $_.Status -eq 'Running' -and ($snapAt - [datetime]$_.Start).TotalMinutes -gt [math]::Max(2 * $maxDur, 60) } | Sort-Object Start })
+        $hung = @($runs | Where-Object { $_.Status -eq 'Running' -and ($snapAt - [datetime]$_.Start).TotalMinutes -gt $stuckAfterMin } | Sort-Object Start)
         $flows += [pscustomobject]@{
             Client = $g.Name; Environment = $f.Environment; EnvironmentId = $f.EnvironmentId; Flow = $f.Flow; FlowId = $f.FlowId; Enabled = $f.Enabled; Trigger = $f.Trigger
             Runs = $runs.Count; Failed = @($runs | Where-Object Status -eq 'Failed').Count
             Last = $(if ($last) { $last.Start } else { '' }); LastStatus = $(if ($last) { $last.Status } else { $f.Status })
             LastFailed = "$($lf.Start)"; LastFailedRun = "$($lf.RunId)"; LastError = "$($lf.Error)"   # '' when none ($null would serialize as {} in 5.1)
             Gap = $gap; Silent = [bool]$silent
-            Stuck = $hung.Count; StuckSince = "$(if ($hung) { $hung[0].Start })"; StuckRun = "$(if ($hung) { $hung[0].RunId })"; MaxDur = [math]::Round($maxDur, 1)   # oldest stuck run; MaxDur in minutes
+            Stuck = $hung.Count; StuckSince = "$(if ($hung) { $hung[0].Start })"; StuckRun = "$(if ($hung) { $hung[0].RunId })"   # oldest stuck run
         }
     }
     foreach ($dg in $g.Group | Where-Object $isRun | Group-Object { $_.Start.Substring(0, 10) }) {
