@@ -53,18 +53,24 @@ foreach ($g in $rows | Group-Object Client) {
         # A flow with no weekend run in the window is measured on the weekday clock (Saturdays and Sundays do not exist), so a weekday
         # schedule is not silent on Sunday, and one that stopped on Friday is caught on Monday afternoon. Statutory holidays are not known: a flow idle on a holiday Monday is flagged that afternoon.
         # ponytail: a flow that stopped more than 7 days ago has no runs left in the window and no gap, so the flag lasts a week at most; keep gaps in state/ if that matters.
-        $starts = @($runs | ForEach-Object { [datetime]$_.Start } | Sort-Object); $gap = 0; $silent = $false
+        $starts = @($runs | ForEach-Object { [datetime]$_.Start } | Sort-Object); $gap = 0.0; $silent = $false   # 0.0: an [int] seed would make [math]::Max pick the integer overload and truncate
         if ($f.Trigger -like 'Recurrence*' -and $starts.Count -ge 3) {
             $clock = if ($starts | Where-Object { $_.DayOfWeek -in 'Saturday', 'Sunday' }) { $wallMin } else { $bizMin }
             for ($i = 1; $i -lt $starts.Count; $i++) { $gap = [math]::Max($gap, (& $clock $starts[$i]) - (& $clock $starts[$i - 1])) }; $gap = [math]::Round($gap, 1)
             $silent = $gap -gt 0 -and "$($f.Enabled)".ToLower() -ne 'false' -and ((& $clock ([datetime]$snapshots[$g.Name])) - (& $clock $starts[-1]) -gt 1.5 * $gap + 15)
         }
+        # Stuck runs: a run still Running for longer than twice the flow's longest finished run this week (floor 1 h): a flow that takes 10 s and has
+        # been running for 2 h is hung, while an approval flow whose runs take days is not. No finished run in the window = no baseline, not flagged.
+        $maxDur = 0.0; foreach ($r in $runs) { if ($r.End -and $r.Status -ne 'Running') { $maxDur = [math]::Max($maxDur, ([datetime]$r.End - [datetime]$r.Start).TotalMinutes) } }
+        $snapAt = [datetime]$snapshots[$g.Name]
+        $hung = @(if ($maxDur -gt 0) { $runs | Where-Object { $_.Status -eq 'Running' -and ($snapAt - [datetime]$_.Start).TotalMinutes -gt [math]::Max(2 * $maxDur, 60) } | Sort-Object Start })
         $flows += [pscustomobject]@{
             Client = $g.Name; Environment = $f.Environment; EnvironmentId = $f.EnvironmentId; Flow = $f.Flow; FlowId = $f.FlowId; Enabled = $f.Enabled; Trigger = $f.Trigger
             Runs = $runs.Count; Failed = @($runs | Where-Object Status -eq 'Failed').Count
             Last = $(if ($last) { $last.Start } else { '' }); LastStatus = $(if ($last) { $last.Status } else { $f.Status })
             LastFailed = "$($lf.Start)"; LastFailedRun = "$($lf.RunId)"; LastError = "$($lf.Error)"   # '' when none ($null would serialize as {} in 5.1)
             Gap = $gap; Silent = [bool]$silent
+            Stuck = $hung.Count; StuckSince = "$(if ($hung) { $hung[0].Start })"; StuckRun = "$(if ($hung) { $hung[0].RunId })"; MaxDur = [math]::Round($maxDur, 1)   # oldest stuck run; MaxDur in minutes
         }
     }
     foreach ($dg in $g.Group | Where-Object $isRun | Group-Object { $_.Start.Substring(0, 10) }) {

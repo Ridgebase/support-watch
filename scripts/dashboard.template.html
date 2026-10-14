@@ -76,7 +76,7 @@
   .num { text-align:right; }
   tr.today { font-weight:600; }
   tr.bad  { background:var(--badbg); }
-  tr.warn, tr.silent { background:var(--warnbg); }
+  tr.warn, tr.silent, tr.stuck { background:var(--warnbg); }
   tr.ok   { background:var(--okbg); }
   tr.off  { color:var(--muted); }
   button.copy { border:0; background:none; color:var(--muted); padding:0; margin-left:6px; cursor:pointer; font-size:12px; line-height:18px; height:18px; display:inline-flex; align-items:center; vertical-align:middle; }
@@ -102,15 +102,17 @@
 const data = __DATA__;
 const STALE_MS = 3600e3;   // the collector runs every 10 min; an hour without a snapshot means it is down
 const latest = data.snapshots;
-const summary = data.flows.map(f => ({ client:f.Client, env:f.Environment, flow:f.Flow, enabled:String(f.Enabled).toLowerCase() !== 'false', trigger:f.Trigger || '', runs:+f.Runs, failed:+f.Failed, last:f.Last || '', lastStatus:f.LastStatus, lastError:f.LastError || '', lastRun:f.LastFailedRun || '', silent:String(f.Silent).toLowerCase() === 'true', gap:+f.Gap || 0,
+const summary = data.flows.map(f => ({ client:f.Client, env:f.Environment, flow:f.Flow, enabled:String(f.Enabled).toLowerCase() !== 'false', trigger:f.Trigger || '', runs:+f.Runs, failed:+f.Failed, last:f.Last || '', lastStatus:f.LastStatus, lastError:f.LastError || '', lastRun:f.LastFailedRun || '', silent:String(f.Silent).toLowerCase() === 'true', gap:+f.Gap || 0, stuck:+f.Stuck || 0, stuckSince:f.StuckSince || '', maxDur:+f.MaxDur || 0,
   url: f.EnvironmentId && f.FlowId ? `https://make.powerautomate.com/environments/${f.EnvironmentId}/flows/${f.FlowId}/details` : '' }));
 const sum = (arr, k) => arr.reduce((n, r) => n + (+r[k] || 0), 0);
 // Colour = what the last run says. Red: last run failed. Yellow: recovered, but failures in the window. UNREADABLE (API timeout) is neutral: a collector hiccup, not a flow problem.
 // Silent (yellow too): a recurrence flow that stopped running without failing (build-dashboard.ps1 sets Silent from the longest gap between its runs this week).
 // Green: no failure in the window. Disabled flows are muted, flows with 0 runs are neutral (and hidden by default).
-const cls = f => !f.enabled ? 'off' : f.lastStatus === 'Failed' ? 'bad' : f.silent ? 'silent' : f.failed > 0 ? 'warn' : f.runs > 0 ? 'ok' : '';
-const problem = f => ['bad', 'silent', 'warn'].includes(cls(f));
-const ago = min => min < 90 ? Math.round(min) + ' min' : min < 36 * 60 ? (min / 60).toFixed(1).replace(/\.0$/, '') + ' h' : (min / 1440).toFixed(1).replace(/\.0$/, '') + ' d';
+// Stuck (yellow): a run still Running far longer than the flow's longest finished run this week (build-dashboard.ps1 sets Stuck).
+const cls = f => !f.enabled ? 'off' : f.lastStatus === 'Failed' ? 'bad' : f.stuck ? 'stuck' : f.silent ? 'silent' : f.failed > 0 ? 'warn' : f.runs > 0 ? 'ok' : '';
+const problem = f => ['bad', 'stuck', 'silent', 'warn'].includes(cls(f));
+const ago = min => min < 1 ? 'under a minute' : min < 90 ? Math.round(min) + ' min' : min < 36 * 60 ? (min / 60).toFixed(1).replace(/\.0$/, '') + ' h' : (min / 1440).toFixed(1).replace(/\.0$/, '') + ' d';
+const stuckWhy = f => `${f.stuck > 1 ? f.stuck + ' runs' : 'A run'} still running since ${fmt(f.stuckSince)} (${ago((new Date(latest[f.client]) - new Date(f.stuckSince)) / 60e3)}); the longest finished run this week took ${ago(f.maxDur)}`;
 const silentWhy = f => `No run for ${ago((new Date(latest[f.client]) - new Date(f.last)) / 60e3)}; the longest gap between two runs this week was ${ago(f.gap)}`;
 // Copy icon from svgrepo (copy-svgrepo-com.svg), fill follows the text colour.
 const COPY_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M15.24 2H11.3458C9.58159 1.99999 8.18418 1.99997 7.09054 2.1476C5.96501 2.29953 5.05402 2.61964 4.33559 3.34096C3.61717 4.06227 3.29833 4.97692 3.14701 6.10697C2.99997 7.205 2.99999 8.60802 3 10.3793V16.2169C3 17.725 3.91995 19.0174 5.22717 19.5592C5.15989 18.6498 5.15994 17.3737 5.16 16.312L5.16 11.3976L5.16 11.3024C5.15993 10.0207 5.15986 8.91644 5.27828 8.03211C5.40519 7.08438 5.69139 6.17592 6.4253 5.43906C7.15921 4.70219 8.06404 4.41485 9.00798 4.28743C9.88877 4.16854 10.9887 4.1686 12.2652 4.16867L12.36 4.16868H15.24L15.3348 4.16867C16.6113 4.1686 17.7088 4.16854 18.5896 4.28743C18.0627 2.94779 16.7616 2 15.24 2Z"/><path d="M6.6001 11.3974C6.6001 8.67119 6.6001 7.3081 7.44363 6.46118C8.28716 5.61426 9.64481 5.61426 12.3601 5.61426H15.2401C17.9554 5.61426 19.313 5.61426 20.1566 6.46118C21.0001 7.3081 21.0001 8.6712 21.0001 11.3974V16.2167C21.0001 18.9429 21.0001 20.306 20.1566 21.1529C19.313 21.9998 17.9554 21.9998 15.2401 21.9998H12.3601C9.64481 21.9998 8.28716 21.9998 7.44363 21.1529C6.6001 20.306 6.6001 18.9429 6.6001 16.2167V11.3974Z"/></svg>';
@@ -138,14 +140,14 @@ function health(client) {
   const dayRows = data.days.filter(d => !client || d.Client === client);
   const clients = Object.keys(latest).filter(c => !client || c === client);
   const stale = clients.some(c => Date.now() - new Date(latest[c]) > STALE_MS);
-  const red = fl.filter(f => cls(f) === 'bad').length, quiet = fl.filter(f => cls(f) === 'silent').length, yellow = fl.filter(f => cls(f) === 'warn').length, unreadable = fl.filter(f => f.lastStatus === 'UNREADABLE').length;
+  const red = fl.filter(f => cls(f) === 'bad').length, hung = fl.filter(f => cls(f) === 'stuck').length, quiet = fl.filter(f => cls(f) === 'silent').length, yellow = fl.filter(f => cls(f) === 'warn').length, unreadable = fl.filter(f => f.lastStatus === 'UNREADABLE').length;
   const today = localDate(new Date());
   const todayRows = dayRows.filter(d => d.Day === today);
   const tOk = sum(todayRows, 'Succeeded'), tBad = sum(todayRows, 'Failed');
   const total7 = sum(dayRows, 'Runs'), failed7 = sum(dayRows, 'Failed');
   // Status follows today, like Koena's, but worded by what it means: red = N flows failing right now (latest run failed, whatever
   // the day); yellow = failures today but recovered; green = clean today. Earlier-in-the-week failures stay visible as yellow rows only.
-  const [label, tone] = stale ? ['Stale data', 'grey'] : red ? [`${red} flow${red > 1 ? 's' : ''} failing`, 'bad'] : quiet ? [`${quiet} flow${quiet > 1 ? 's' : ''} silent`, 'warn'] : tBad ? ['Recovered today', 'warn'] : total7 ? ['All flows OK', 'ok'] : ['Waiting', 'grey'];
+  const [label, tone] = stale ? ['Stale data', 'grey'] : red ? [`${red} flow${red > 1 ? 's' : ''} failing`, 'bad'] : hung ? [`${hung} flow${hung > 1 ? 's' : ''} stuck`, 'warn'] : quiet ? [`${quiet} flow${quiet > 1 ? 's' : ''} silent`, 'warn'] : tBad ? ['Recovered today', 'warn'] : total7 ? ['All flows OK', 'ok'] : ['Waiting', 'grey'];
   // Last run per client: the flow with the most recent start in that client's snapshot.
   const lastPer = clients.map(c => fl.filter(f => f.client === c && f.runs > 0).sort((a, b) => b.last.localeCompare(a.last))[0]).filter(Boolean);
   let h = `<div class="card health">
@@ -153,7 +155,7 @@ function health(client) {
     <div class="kpi"><div class="big">${pct(tOk, tOk + tBad)}</div><small>Today's success rate (${tOk} / ${tOk + tBad} runs)</small></div>
     <div class="stat"><div class="big">${total7}</div><small>Runs, last 7 days</small></div>
     <div class="stat ${failed7 ? 'c-bad' : ''}"><a href="#failed" class="big">${failed7}</a><small>Failed, last 7 days</small></div>
-    <div class="stat ${red ? 'c-bad' : yellow + quiet ? 'c-warn' : ''}"><a href="#flows" class="big">${red + yellow + quiet}</a><small>Flows needing attention</small></div>
+    <div class="stat ${red ? 'c-bad' : yellow + quiet + hung ? 'c-warn' : ''}"><a href="#flows" class="big">${red + yellow + quiet + hung}</a><small>Flows needing attention</small></div>
     <div class="stat ${unreadable ? 'c-grey' : ''}"><a href="#unreachable" class="big">${unreadable}</a><small>Unreachable flows</small></div>
     <div class="last">${lastPer.map(f => `<div>Last run${clients.length > 1 ? ' ' + esc(f.client) : ''}: <b>${esc(f.flow)}</b> · <b class="${statusClass(f.lastStatus)}">${esc(f.lastStatus)}</b> · ${fmt(f.last)}</div>`).join('') || '<div>No runs yet</div>'}</div>
   </div>`;
@@ -285,11 +287,11 @@ function render() {
 
   // Power Automate tab. A selected customer with no flow at all (a helpdesk-only customer) gets the Power BI tab's kind of empty message, not a Waiting card.
   if (client && !summary.some(f => f.client === client)) { document.getElementById('out').innerHTML = '<p class="muted">No Power Automate flow to show.</p>'; return; }
-  h += health(client);  const rank = { bad: 0, silent: 1, warn: 2, ok: 3, '': 4, off: 5 };
+  h += health(client);  const rank = { bad: 0, stuck: 1, silent: 2, warn: 3, ok: 4, '': 5, off: 6 };
   const list = summary.filter(f => (!client || f.client === client) && (!only || problem(f)) && (!hideQuiet || f.runs > 0))
     .sort((a, b) => rank[cls(a)] - rank[cls(b)] || b.failed - a.failed || a.client.localeCompare(b.client) || a.flow.localeCompare(b.flow));
   h += `<h2 id="flows">Flows <span class="muted">(${list.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Flow</th><th>Enabled</th><th class="num">Runs</th><th class="num">Failed</th><th>Last run</th><th>Last status</th></tr></thead><tbody>`;
-  for (const f of list) h += `<tr class="${cls(f)}"><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td class="flow">${esc(f.flow)}${copyBtn(f.url)}</td><td>${f.enabled ? 'Yes' : 'No'}</td><td class="num">${f.runs}</td><td class="num">${f.failed}</td><td>${fmt(f.last)}</td><td class="${statusClass(f.lastStatus)}" title="${esc(f.lastStatus === 'Failed' ? f.lastError : '')}">${esc(f.lastStatus)}${cls(f) === 'silent' ? ` <b class="c-warn" title="${esc(silentWhy(f))}">silent</b>` : ''}</td></tr>`;
+  for (const f of list) h += `<tr class="${cls(f)}"><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td class="flow">${esc(f.flow)}${copyBtn(f.url)}</td><td>${f.enabled ? 'Yes' : 'No'}</td><td class="num">${f.runs}</td><td class="num">${f.failed}</td><td>${fmt(f.last)}</td><td class="${statusClass(f.lastStatus)}" title="${esc(f.lastStatus === 'Failed' ? f.lastError : '')}">${esc(f.lastStatus)}${cls(f) === 'silent' ? ` <b class="c-warn" title="${esc(silentWhy(f))}">silent</b>` : ''}${cls(f) === 'stuck' ? ` <b class="c-warn" title="${esc(stuckWhy(f))}">stuck</b>` : ''}</td></tr>`;
   h += '</tbody></table></div>';
 
   // One row per flow and error, newest first, with the number of runs: a flow failing every 30 min for a day is one line, not 48.

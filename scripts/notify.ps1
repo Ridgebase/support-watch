@@ -28,7 +28,7 @@ $now   = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz)
 $fmt   = { param($s) if ($s -is [datetime]) { $s.ToString('yyyy-MM-dd HH:mm') } elseif ($s) { "$s".Substring(0, 16).Replace('T', ' ') } else { 'never' } }   # pwsh 7 parses ISO strings in JSON into [datetime], 5.1 keeps strings
 $url   = { param($f) "https://make.powerautomate.com/environments/$($f.EnvironmentId)/flows/$($f.FlowId)/details" }
 $runUrl = { param($f) if ($f.LastFailedRun) { "https://make.powerautomate.com/environments/$($f.EnvironmentId)/flows/$($f.FlowId)/runs/$($f.LastFailedRun)" } else { & $url $f } }   # the failed run itself when its id is known
-$every = { param($m) if ($m -lt 90) { "$([math]::Round($m)) min" } elseif ($m -lt 36 * 60) { "$([math]::Round($m / 60, 1)) h" } else { "$([math]::Round($m / 1440, 1)) d" } }
+$every = { param($m) if ($m -lt 1) { 'under a minute' } elseif ($m -lt 90) { "$([math]::Round($m)) min" } elseif ($m -lt 36 * 60) { "$([math]::Round($m / 60, 1)) h" } else { "$([math]::Round($m / 1440, 1)) d" } }
 $esc   = { param($s) [System.Net.WebUtility]::HtmlEncode("$s") }
 $mails = @()
 if ($Sample) { $open = @{}; foreach ($f in $d.flows) { $f | Add-Member LastFailed '' -Force }; foreach ($g in $d.flows | Where-Object { $_.Runs -gt 0 } | Group-Object Client) { $g.Group[0].LastStatus = 'Failed'; $g.Group[0].Failed = 1; $g.Group[0].LastFailed = $g.Group[0].Last }
@@ -61,9 +61,37 @@ foreach ($f in @($d.flows | Where-Object LastStatus -eq 'UNREADABLE')) { $k = & 
 # Silent flows (Silent set by build-dashboard.ps1: a recurrence flow that stopped running without failing). Announced once per silence: the key's
 # value is the flow's last run, so it is announced again only after it ran and stopped again. A flow whose last run failed is in the failure alert instead.
 $silent    = @($d.flows | Where-Object { "$($_.Silent)".ToLower() -eq 'true' -and $_.LastStatus -ne 'Failed' })
-$silentNew = @(if (-not $Sample -and -not $SampleDigest) { $silent | Where-Object { $k = "$($_.Client)|silent|$($_.FlowId)"; -not $open.ContainsKey($k) -or (& $iso $_.Last) -gt (& $iso $open[$k]) } })
+$silentNew = @(if (-not $Sample -and -not $SampleDigest) { $silent | Where-Object { $k = "$($_.Client)|silent|$($_.FlowId)"; -not $prev.ContainsKey($k) -or (& $iso $_.Last) -gt (& $iso $prev[$k]) } })
 foreach ($f in $silent) { $open["$($f.Client)|silent|$($f.FlowId)"] = & $iso $f.Last }
 $sinceMin  = { param($f) ([datetime]$d.snapshots.$($f.Client) - [datetime]$f.Last).TotalMinutes }   # both Eastern, from data.json
+# Stuck runs (Stuck set by build-dashboard.ps1: a run still Running far longer than the flow's longest finished run this week). Announced once per
+# stuck run (key value = its start); a flow whose last run failed is in the failure alert, but a stuck run is a separate thing and is still announced.
+$stuck    = @($d.flows | Where-Object { [int]$_.Stuck -gt 0 })
+$stuckNew = @(if (-not $Sample -and -not $SampleDigest) { $stuck | Where-Object { $k = "$($_.Client)|stuck|$($_.FlowId)"; -not $prev.ContainsKey($k) -or (& $iso $_.StuckSince) -gt (& $iso $prev[$k]) } })
+foreach ($f in $stuck) { $open["$($f.Client)|stuck|$($f.FlowId)"] = & $iso $f.StuckSince }
+$stuckUrl = { param($f) if ($f.StuckRun) { "https://make.powerautomate.com/environments/$($f.EnvironmentId)/flows/$($f.FlowId)/runs/$($f.StuckRun)" } else { & $url $f } }
+$stuckRow = { param($f) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>$(& $esc $f.Flow)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $f.Environment) &middot; $(if ([int]$f.Stuck -gt 1) { "$($f.Stuck) runs" } else { 'a run' }) still running since $(& $fmt $f.StuckSince) ($(& $every (([datetime]$d.snapshots.$($f.Client) - [datetime]$f.StuckSince).TotalMinutes))) &middot; longest finished run this week $(& $every $f.MaxDur)</span>" +
+                          "<div style=""margin-top:6px;font:11px/1.4 Consolas,Menlo,monospace;color:$($col.muted);word-break:break-all"">$(& $stuckUrl $f)</div></td>" +
+                          "<td style=""padding:10px 0 10px 12px;border-top:1px solid #e2e4e7;text-align:right;white-space:nowrap""><a href=""$(& $stuckUrl $f)"" style=""display:inline-block;padding:6px 12px;border-radius:4px;background:$($col.warn);color:#fff;text-decoration:none;font-size:12px;font-weight:600"">Open run</a></td></tr>" }
+if ($stuckNew) {
+    $cards = foreach ($g in $stuckNew | Group-Object Client) {
+        & $card "$($g.Name) $(& $pill "$($g.Count) stuck" $col.warn $col.warnbg)" "<table style=""width:100%;border-collapse:collapse"">$(($g.Group | ForEach-Object { & $stuckRow $_ }) -join '')</table>"
+    }
+    $mails += @{ subject = "[Support Watch] $(($stuckNew | Group-Object Client | ForEach-Object { "$($_.Name): $($_.Count) stuck" }) -join ', ')"
+                 body    = & $wrap 'A run has been running far longer than the flow ever takes: open it, and cancel or resubmit it' "$($stuckNew.Count) flow$(if ($stuckNew.Count -gt 1) { 's' }) with a stuck run" ($cards -join '') }
+}
+# Stale clients: no fresh snapshot for over an hour (sign-in refused, token revoked, collector down). Announced once per episode: the key's value is the
+# stale snapshot, so a client that recovers and goes stale again is announced again; a fresh snapshot drops the key.
+$stale    = @(foreach ($p in $d.snapshots.PSObject.Properties) { $hrs = ([datetime]::UtcNow - [TimeZoneInfo]::ConvertTimeToUtc([datetime]$p.Value, $tz)).TotalHours; if ($hrs -gt 1) { [pscustomobject]@{ Client = $p.Name; Since = & $iso $p.Value; Hours = [math]::Round($hrs, 1) } } })
+$staleNew = @(if (-not $Sample -and -not $SampleDigest) { $stale | Where-Object { -not $prev.ContainsKey("stale|$($_.Client)") } })
+foreach ($s in $stale) { $open["stale|$($s.Client)"] = $s.Since }
+if ($staleNew) {
+    $cards = foreach ($s in $staleNew) {
+        & $card "$($s.Client) $(& $pill "no data for $($s.Hours) h" $col.warn $col.warnbg)" "<div>Last snapshot $(& $fmt $s.Since). The page keeps that snapshot and shows STALE.</div><div style=""color:$($col.muted);font-size:12px;margin-top:6px"">Usual causes: the refresh token was revoked (rerun get-refresh-token.ps1 and update the RT_$($s.Client) secret), the tenant's Conditional Access refused the sign-in, or the collector did not run (see the healthchecks.io alert).</div>"
+    }
+    $mails += @{ subject = "[Support Watch] $(($staleNew | ForEach-Object { "$($_.Client): no data for $($_.Hours) h" }) -join ', ')"
+                 body    = & $wrap 'The job log on GitHub Actions (or the function log) names the error' "$($staleNew.Count) client$(if ($staleNew.Count -gt 1) { 's' }) not collected" ($cards -join '') }
+}
 $silentRow = { param($f) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>$(& $esc $f.Flow)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $f.Environment) &middot; no run for $(& $every (& $sinceMin $f)) &middot; last run $(& $fmt $f.Last) $(& $esc $f.LastStatus) &middot; longest gap this week $(& $every $f.Gap) &middot; $($f.Runs) runs in 7 days</span>" +
                            "<div style=""margin-top:6px;font:11px/1.4 Consolas,Menlo,monospace;color:$($col.muted);word-break:break-all"">$(& $url $f)</div></td>" +
                            "<td style=""padding:10px 0 10px 12px;border-top:1px solid #e2e4e7;text-align:right;white-space:nowrap""><a href=""$(& $url $f)"" style=""display:inline-block;padding:6px 12px;border-radius:4px;background:$($col.warn);color:#fff;text-decoration:none;font-size:12px;font-weight:600"">Open flow</a></td></tr>" }
@@ -78,7 +106,7 @@ if ($silentNew) {
 # A failure older than 7 days is never news (an abandoned sandbox would otherwise alert at the first run after a state reset).
 $weekAgo   = $now.AddDays(-7).ToString('s')
 $pbiFailed = @($d.powerbi | Where-Object { $_.Status -eq 'Failed' -and $_.Start -and (& $iso $_.Start) -gt $weekAgo })
-$pbiNew    = @(if (-not $SampleDigest) { $pbiFailed | Where-Object { $k = "$($_.Client)|pbi|$($_.ModelId)"; -not $open.ContainsKey($k) -or (& $iso $_.Start) -gt (& $iso $open[$k]) } })   # @() outside the if: a one-element result would otherwise unwrap
+$pbiNew    = @(if (-not $SampleDigest) { $pbiFailed | Where-Object { $k = "$($_.Client)|pbi|$($_.ModelId)"; -not $prev.ContainsKey($k) -or (& $iso $_.Start) -gt (& $iso $prev[$k]) } })   # $prev: $open was just rebuilt without these keys   # @() outside the if: a one-element result would otherwise unwrap
 foreach ($r in $pbiFailed) { $open["$($r.Client)|pbi|$($r.ModelId)"] = & $iso $r.Start }
 $pbiRow = { param($r) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>$(& $esc $r.Model)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $r.Workspace) &middot; refresh failed $(& $fmt $r.Start) &middot; $(& $esc $r.Type)</span>" +
                         "<div style=""margin-top:6px;font:11px/1.4 Consolas,Menlo,monospace;color:$($col.muted);word-break:break-all"">$($r.Url)</div></td>" +
@@ -109,10 +137,10 @@ if (($now.DayOfWeek -eq 'Monday' -and $now.Hour -ge 7 -and $digest -ne $today -a
     $cards = foreach ($c in $clients) {
         $days = @($d.days | Where-Object Client -eq $c)   # data.json already holds exactly the last 7 days
         $runs = ($days | Measure-Object Runs -Sum).Sum; $bad = ($days | Measure-Object Failed -Sum).Sum; $ok = ($days | Measure-Object Succeeded -Sum).Sum; $can = ($days | Measure-Object Cancelled -Sum).Sum
-        $red  = @($failing | Where-Object Client -eq $c); $quiet = @($silent | Where-Object Client -eq $c)
+        $red  = @($failing | Where-Object Client -eq $c); $quiet = @($silent | Where-Object Client -eq $c); $hungC = @($stuck | Where-Object Client -eq $c)
         $hit  = @($d.flows | Where-Object { $_.Client -eq $c -and $_.Failed -gt 0 } | Sort-Object { -$_.Failed }, Flow)   # every flow that failed in the week, failing-now or recovered
         $age  = [datetime]::UtcNow - [TimeZoneInfo]::ConvertTimeToUtc([datetime]$d.snapshots.$c, $tz)
-        $pills = $(if ($red) { & $pill "$($red.Count) failing" $col.bad $col.badbg } else { & $pill 'Healthy' $col.ok $col.okbg }) + $(if ($quiet) { ' ' + (& $pill "$($quiet.Count) silent" $col.warn $col.warnbg) }) + $(if ($age.TotalHours -gt 1) { ' ' + (& $pill "STALE since $(& $fmt $d.snapshots.$c)" $col.warn $col.warnbg) })
+        $pills = $(if ($red) { & $pill "$($red.Count) failing" $col.bad $col.badbg } else { & $pill 'Healthy' $col.ok $col.okbg }) + $(if ($hungC) { ' ' + (& $pill "$($hungC.Count) stuck" $col.warn $col.warnbg) }) + $(if ($quiet) { ' ' + (& $pill "$($quiet.Count) silent" $col.warn $col.warnbg) }) + $(if ($age.TotalHours -gt 1) { ' ' + (& $pill "STALE since $(& $fmt $d.snapshots.$c)" $col.warn $col.warnbg) })
         $rate = if ($ok + $bad) { "$([math]::Round(100 * $ok / ($ok + $bad), 2))%" } else { '&mdash;' }
         $week = if ($runs) { "<b>$runs</b> runs &middot; <b style=""color:$(if ($bad) { $col.bad } else { $col.ok })"">$bad</b> failed &middot; $can cancelled &middot; $rate success" } else { 'no runs' }
         $rows = if ($hit) { "<div style=""color:$($col.muted);font-size:12px;margin-top:10px"">Flows with failures this week</div><table style=""width:100%;border-collapse:collapse"">$(($hit | ForEach-Object { & $flowRow $_ }) -join '')</table>" } else { '' }

@@ -28,7 +28,8 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   each, the run's generic banner for older ones; ~40 KB instead of every run) and renders `out/site/index.html` from `dashboard.template.html`. It also flags
   **silent** flows: an enabled recurrence flow whose last run is older than 1.5x the longest gap between two of its runs this week
   (3 runs needed), i.e. a schedule that stopped without failing. A flow with no weekend run is measured in weekday time, so a
-  weekday schedule is not silent over the weekend. Yellow on the page, counted in "needing attention", emailed once.
+  weekday schedule is not silent over the weekend. Yellow on the page, counted in "needing attention", emailed once. Same for
+  **stuck** runs: a run still Running for longer than twice the flow's longest finished run this week (floor 1 h).
 - The same run also collects, per client, the refresh history of the Power BI models listed under `PowerBI` in `CLIENTS_JSON`
   (`out/powerbi.csv` = last refresh per model, `out/powerbi-runs.csv` = every refresh of the window, aggregated per day into
   `pbidays` for the Power BI tab's recap and the weekly mail) and, for every listed environment, the canvas apps and connections
@@ -78,7 +79,8 @@ from `CARRY_URL` only, i.e. from the Azure function, even on the days SEMO's Con
 
 `notify.ps1` runs after each deploy. It emails one message per run listing the flows whose latest run has **newly**
 failed (a flow that keeps failing is announced once, until it recovers), with the run's error text and a link to the failed run,
-one message for flows that went **silent** (announced once per silence), and one weekly recap on Monday after 07:00
+one message for flows that went **silent** (announced once per silence), one for **stuck** runs (once per run), one when a client has
+had **no data for over an hour** (once per episode: token revoked, sign-in refused or collector down), and one weekly recap on Monday after 07:00
 Eastern with the last 7 days' totals per client, every flow that failed in the week and the Helpdesk tickets in progress (those past
 SLA named). No recap on Monday morning =
 the job itself is broken. `gh workflow run watch.yml -f digest=true` sends a sample recap right away.
