@@ -13,6 +13,14 @@ on:
         description: Send the weekly recap now, prefixed [Sample] (nothing saved)
         type: boolean
         default: false
+      sample_ops:
+        description: Send a sample stuck-run alert and a sample stale-client alert, prefixed [Sample] (nothing saved)
+        type: boolean
+        default: false
+      to:
+        description: Recipient override for the sample sends above (ignored otherwise)
+        type: string
+        default: ''
 
 # Public repo: scheduled workflows are disabled after 60 days without repo activity, so the job commits a
 # one-line marker once a day (last step). Secrets never touch the repo. The page is published to Azure Static
@@ -61,8 +69,8 @@ jobs:
           SMTP_HOST:     ${{ secrets.SMTP_HOST }}
           SMTP_USER:     ${{ secrets.SMTP_USER }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          MAIL_TO:       ${{ secrets.MAIL_TO }}
-        run: git pull -q --ff-only; ./scripts/notify.ps1 -Sample:('${{ inputs.sample }}' -eq 'true') -SampleDigest:('${{ inputs.digest }}' -eq 'true')
+          MAIL_TO:       ${{ (inputs.sample || inputs.digest || inputs.sample_ops) && inputs.to || secrets.MAIL_TO }}   # the override applies to sample sends only
+        run: git pull -q --ff-only; ./scripts/notify.ps1 -Sample:('${{ inputs.sample }}' -eq 'true') -SampleDigest:('${{ inputs.digest }}' -eq 'true') -SampleOps:('${{ inputs.sample_ops }}' -eq 'true')
 
       # Dead-man's switch: a healthchecks.io check expects this ping every 10 min (grace 1 h) and emails when it stops, i.e. when the
       # job no longer runs or no longer gets this far (cron-job.org token expired, GitHub schedule disabled, collector broken, ...).

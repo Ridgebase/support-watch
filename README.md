@@ -83,7 +83,8 @@ one message for flows that went **silent** (announced once per silence), one for
 had **no data for over an hour** (once per episode: token revoked, sign-in refused or collector down), and one weekly recap on Monday after 07:00
 Eastern with the last 7 days' totals per client, every flow that failed in the week and the Helpdesk tickets in progress (those past
 SLA named). No recap on Monday morning =
-the job itself is broken. `gh workflow run watch.yml -f digest=true` sends a sample recap right away.
+the job itself is broken. `gh workflow run watch.yml -f digest=true` sends a sample recap right away; `-f sample_ops=true` a sample stuck-run alert and a sample
+stale-client alert; `-f sample=true` a sample failure alert. Add `-f to=<address>` to send a sample to someone else than `MAIL_TO`.
 `alerts.json` (committed by the workflow) remembers what was already announced.
 
 Mail is sent over SMTP from a team member's Google Workspace account with an app password: Ridgebase's mail is
