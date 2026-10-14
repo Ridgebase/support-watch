@@ -96,7 +96,9 @@ foreach ($c in $clients) {
             $err = { param($e) if ($e) { & $cap "$($e['code']): $($e['message'])" } else { '' } }
             $outMsg = { param($uri) try {
                     $b = (((Invoke-WebRequest -Uri $uri -TimeoutSec 15).Content | ConvertFrom-Json -AsHashtable))['body']
-                    $m = if ($b -is [hashtable]) { if ($b['error'] -is [hashtable] -and $b['error']['message']) { $b['error']['message'] } elseif ($b['message']) { $b['message'] } else { $b | ConvertTo-Json -Compress -Depth 3 } } else { "$b" }
+                    # Connectors disagree on the key's case (message / Message); an HTML body (a gateway's 503 page) says nothing worth a line.
+                    $pick = { param($h, $k) if ($h -is [hashtable]) { foreach ($n in $h.Keys) { if ($n -ieq $k) { return $h[$n] } } } }
+                    $m = if ($b -is [hashtable]) { $x = "$(& $pick (& $pick $b 'error') 'message')"; if (-not $x) { $x = "$(& $pick $b 'message')" }; if (-not $x) { $x = $b | ConvertTo-Json -Compress -Depth 3 }; $x } elseif ("$b".TrimStart() -notlike '<*') { "$b" } else { '' }
                     ($m -replace '(?i)\s*(clientRequestId|CorrelationId):\s*\S+', '').Trim()   # request ids are noise in a one-line summary
                 } catch { '' } }
             $actErr = { param($runName)
