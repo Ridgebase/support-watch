@@ -31,7 +31,7 @@
   .controls label { display:inline-flex; align-items:center; gap:8px; cursor:pointer; }
   .controls label[data-for] { display:none; }   /* the second switch depends on the tab */
   body[data-tab="pa"] .controls label[data-for="pa"], body[data-tab="bi"] .controls label[data-for="bi"], body[data-tab="apps"] .controls label[data-for="apps"] { display:inline-flex; }
-  td.text { white-space:normal; min-width:160px; max-width:420px; }   /* error messages and connector lists wrap too */
+  td.text { white-space:normal; min-width:160px; max-width:560px; }   /* error messages and connector lists wrap too */
   body[data-tab="apps"] th, body[data-tab="apps"] td, body[data-tab="help"] th, body[data-tab="help"] td { white-space:normal; }
   body[data-tab="apps"] td.date, body[data-tab="help"] td.date { white-space:nowrap; }   /* a date split over two lines reads badly */   /* every cell may wrap: the tables then always fit the page width, no sideways scroll */
   select { appearance:none; -webkit-appearance:none; font:inherit; color:var(--fg); background:var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' fill='none' stroke='%2376706a' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 10px center / 12px; border:1px solid var(--line); border-radius:6px; padding:6px 30px 6px 10px; min-width:160px; cursor:pointer; }

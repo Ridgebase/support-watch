@@ -86,7 +86,7 @@ foreach ($c in $clients) {
             $flow = $_; $api = $using:api; $ver = $using:ver; $h = $using:h; $since = $using:since; $tz = $using:tz; $envId = ($using:env)['name']
             $fd = ($using:c).FlowDays; $fdName = $flow['properties']['displayName']; if ($fd -and $fd.$fdName) { $since = ($using:nowUtc).AddDays(-$fd.$fdName) }
             $utc = { param($s) [datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
-            $cap = { param($m) $m = "$m".Trim(': ') -replace '\s+', ' '; if ($m.Length -gt 400) { $m.Substring(0, 400) + '...' } else { $m } }
+            $cap = { param($m) $m = "$m".Trim(': ') -replace '\s+', ' '; if ($m.Length -gt 4000) { $m.Substring(0, 4000) + '...' } else { $m } }   # the user wants the whole message; 4000 only guards the CSV and the page
             # A failed run's own error is the same banner nearly every time ("ActionFailed: An action failed. No dependent actions succeeded."), so
             # the newest failed runs of the flow get two more calls each: the run's actions, where the failed leaf names what broke, then that
             # leaf's outputs (a short-lived blob URL in outputsLink, no auth), whose body carries the connector's message:
@@ -96,10 +96,10 @@ foreach ($c in $clients) {
             $err = { param($e) if ($e) { & $cap "$($e['code']): $($e['message'])" } else { '' } }
             $outMsg = { param($uri) try {
                     $b = (((Invoke-WebRequest -Uri $uri -TimeoutSec 15).Content | ConvertFrom-Json -AsHashtable))['body']
-                    # Connectors disagree on the key's case (message / Message); of an HTML body (a gateway's 503 page) only the title is worth a line.
+                    # Connectors disagree on the key's case (message / Message); an HTML body (a gateway's 503 page) is kept as its text, tags stripped.
                     $pick = { param($h, $k) if ($h -is [hashtable]) { foreach ($n in $h.Keys) { if ($n -ieq $k) { return $h[$n] } } } }
-                    $m = if ($b -is [hashtable]) { $x = "$(& $pick (& $pick $b 'error') 'message')"; if (-not $x) { $x = "$(& $pick $b 'message')" }; if (-not $x) { $x = $b | ConvertTo-Json -Compress -Depth 3 }; $x } elseif ("$b".TrimStart() -notlike '<*') { "$b" } elseif ("$b" -match '(?is)<title>\s*(.+?)\s*</title>') { $Matches[1] } else { '' }
-                    ($m -replace '(?i)\s*(clientRequestId|CorrelationId):\s*\S+', '').Trim()   # request ids are noise in a one-line summary
+                    $m = if ($b -is [hashtable]) { $x = "$(& $pick (& $pick $b 'error') 'message')"; if (-not $x) { $x = "$(& $pick $b 'message')" }; if (-not $x) { $x = $b | ConvertTo-Json -Compress -Depth 3 }; $x } elseif ("$b".TrimStart() -notlike '<*') { "$b" } else { ("$b" -replace '(?is)<(script|style).*?</>', '' -replace '<[^>]+>', ' ' -replace '&nbsp;', ' ') }   # an HTML error page, as its text
+                    "$m".Trim()   # kept whole, request ids included: the user wants the entire message
                 } catch { '' } }
             $actErr = { param($runName)
                 try {
