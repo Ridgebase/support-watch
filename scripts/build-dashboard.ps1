@@ -23,6 +23,10 @@ $conns   = @(if (Test-Path $ConnCsv) { @(Import-Csv $ConnCsv) } else { @() })
 $tickets = @(if (Test-Path $TicketsCsv) { @(Import-Csv $TicketsCsv) } else { @() })   # Odoo Helpdesk tickets in progress, from collect.ps1 (cloud job only, never carried over)
 $pbiRuns = @(if (Test-Path $PbiRunsCsv) { @(Import-Csv $PbiRunsCsv) } else { @() })   # one row per Power BI refresh in the window, from collect.ps1
 $pbidays = @(); $pbifails = @()
+# Weekday clock for silent-flow detection: minutes since 2000-01-03 (a Monday) with Saturdays and Sundays removed; a weekend instant counts as Friday midnight.
+$bizMin = { param([datetime]$d) $dow = [int]$d.DayOfWeek; $wk = [math]::Floor(($d.Date - [datetime]'2000-01-03').TotalDays / 7)
+    $wd = if ($dow -in 0, 6) { 5 } else { $dow - 1 }; $tod = if ($dow -in 0, 6) { 0 } else { ($d - $d.Date).TotalMinutes }; ($wk * 5 + $wd) * 1440 + $tod }
+$wallMin = { param([datetime]$d) ($d - [datetime]'2000-01-03').TotalMinutes }
 
 # Power BI week, same shape as the flows: totals per model on its row, totals per client per day for the tab's recap and the weekly mail.
 foreach ($m in $powerbi) {
@@ -42,11 +46,25 @@ foreach ($g in $rows | Group-Object Client) {
     $snapshots[$g.Name] = ($g.Group | Sort-Object Collected -Descending)[0].Collected
     foreach ($fg in $g.Group | Group-Object Environment, FlowId, Flow) {
         $f = $fg.Group[0]; $runs = @($fg.Group | Where-Object $isRun); $last = $runs | Sort-Object Start -Descending | Select-Object -First 1
+        $lf = $runs | Where-Object Status -eq 'Failed' | Sort-Object Start -Descending | Select-Object -First 1   # the latest failed run: notify.ps1 alerts when it is newer than the one it last announced
+        # Silent flows: Gap = the longest interval between two runs of a recurrence flow this week, in minutes (3 runs needed). An enabled
+        # flow whose last run is older than 1.5x that (+15 min of collection slack) at snapshot time is Silent: it stopped running without
+        # failing, which no failure count shows. The longest gap, not the median, so a business-hours schedule is not silent every night.
+        # A flow with no weekend run in the window is measured on the weekday clock (Saturdays and Sundays do not exist), so a weekday
+        # schedule is not silent on Sunday, and one that stopped on Friday is caught on Monday afternoon. Statutory holidays are not known: a flow idle on a holiday Monday is flagged that afternoon.
+        # ponytail: a flow that stopped more than 7 days ago has no runs left in the window and no gap, so the flag lasts a week at most; keep gaps in state/ if that matters.
+        $starts = @($runs | ForEach-Object { [datetime]$_.Start } | Sort-Object); $gap = 0; $silent = $false
+        if ($f.Trigger -like 'Recurrence*' -and $starts.Count -ge 3) {
+            $clock = if ($starts | Where-Object { $_.DayOfWeek -in 'Saturday', 'Sunday' }) { $wallMin } else { $bizMin }
+            for ($i = 1; $i -lt $starts.Count; $i++) { $gap = [math]::Max($gap, (& $clock $starts[$i]) - (& $clock $starts[$i - 1])) }; $gap = [math]::Round($gap, 1)
+            $silent = $gap -gt 0 -and "$($f.Enabled)".ToLower() -ne 'false' -and ((& $clock ([datetime]$snapshots[$g.Name])) - (& $clock $starts[-1]) -gt 1.5 * $gap + 15)
+        }
         $flows += [pscustomobject]@{
             Client = $g.Name; Environment = $f.Environment; EnvironmentId = $f.EnvironmentId; Flow = $f.Flow; FlowId = $f.FlowId; Enabled = $f.Enabled; Trigger = $f.Trigger
             Runs = $runs.Count; Failed = @($runs | Where-Object Status -eq 'Failed').Count
             Last = $(if ($last) { $last.Start } else { '' }); LastStatus = $(if ($last) { $last.Status } else { $f.Status })
-            LastFailed = "$($runs | Where-Object Status -eq 'Failed' | Sort-Object Start -Descending | Select-Object -First 1 -ExpandProperty Start)"   # '' when none ($null would serialize as {} in 5.1); notify.ps1 alerts on a failed run newer than the one it last announced
+            LastFailed = "$($lf.Start)"; LastFailedRun = "$($lf.RunId)"; LastError = "$($lf.Error)"   # '' when none ($null would serialize as {} in 5.1)
+            Gap = $gap; Silent = [bool]$silent
         }
     }
     foreach ($dg in $g.Group | Where-Object $isRun | Group-Object { $_.Start.Substring(0, 10) }) {
@@ -57,7 +75,7 @@ foreach ($g in $rows | Group-Object Client) {
             Cancelled = @($dg.Group | Where-Object Status -eq 'Cancelled').Count
         }
     }
-    $fails += @($g.Group | Where-Object Status -eq 'Failed' | Sort-Object Start -Descending | Select-Object -First 100 Client, Environment, Flow, Start)
+    $fails += @($g.Group | Where-Object Status -eq 'Failed' | Sort-Object Start -Descending | Select-Object -First 100 Client, Environment, Flow, Start, RunId, Error)
 }
 
 if (Test-Path $Carry) {

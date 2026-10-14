@@ -64,6 +64,14 @@ jobs:
           MAIL_TO:       ${{ secrets.MAIL_TO }}
         run: git pull -q --ff-only; ./scripts/notify.ps1 -Sample:('${{ inputs.sample }}' -eq 'true') -SampleDigest:('${{ inputs.digest }}' -eq 'true')
 
+      # Dead-man's switch: a healthchecks.io check expects this ping every 10 min (grace 1 h) and emails when it stops, i.e. when the
+      # job no longer runs or no longer gets this far (cron-job.org token expired, GitHub schedule disabled, collector broken, ...).
+      # Only on success (every step above worked). Skipped when the HEALTHCHECK_URL secret is unset.
+      - name: Ping the dead-man's switch
+        env:
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+        run: '[ -z "$HEALTHCHECK_URL" ] || curl -fsS -m 10 --retry 3 -o /dev/null "$HEALTHCHECK_URL"'
+
       - name: Save alert state; keep the schedule alive (one commit a day)
         if: always()
         run: |

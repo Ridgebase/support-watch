@@ -22,3 +22,5 @@ $json = [IO.File]::ReadAllText((Join-Path $work 'out/site/data.json'))
 $body = @{ files = @{ 'data.json' = @{ content = $json } } } | ConvertTo-Json -Depth 5
 Invoke-RestMethod -Method Patch -Uri "https://api.github.com/gists/$($env:GIST_ID)" -Headers @{ Authorization = "Bearer $($env:GIST_TOKEN)"; Accept = 'application/vnd.github+json' } -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body)) | Out-Null
 Write-Host "data.json published to gist $($env:GIST_ID) ($([int]($json.Length / 1024)) KB)"
+# Dead-man's switch: a second healthchecks.io check (period 15 min, grace 1 h) for this collector; set HEALTHCHECK_URL in the app settings.
+if ($env:HEALTHCHECK_URL) { Invoke-RestMethod -Uri $env:HEALTHCHECK_URL -TimeoutSec 10 | Out-Null }

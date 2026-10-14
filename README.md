@@ -1,4 +1,4 @@
-# Support Watch
+﻿# Support Watch
 
 A one-page status board for clients' Power Automate cloud flows, in the shape of the Koena health panel:
 status, today's success rate, last run per client, a 7-day table, then every flow with its last status.
@@ -23,8 +23,11 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
 
 - `collect.ps1` signs in to each client tenant with a **refresh token**, reads flows and their runs for the
   configured environments through the Flow REST API, and writes `out/flow-runs.csv`.
-- `build-dashboard.ps1` aggregates that CSV into `out/site/data.json` (per-flow and per-day totals, failed runs; ~40 KB
-  instead of every run) and renders `out/site/index.html` from `dashboard.template.html`.
+- `build-dashboard.ps1` aggregates that CSV into `out/site/data.json` (per-flow and per-day totals, failed runs with their error
+  text and run id; ~40 KB instead of every run) and renders `out/site/index.html` from `dashboard.template.html`. It also flags
+  **silent** flows: an enabled recurrence flow whose last run is older than 1.5x the longest gap between two of its runs this week
+  (3 runs needed), i.e. a schedule that stopped without failing. A flow with no weekend run is measured in weekday time, so a
+  weekday schedule is not silent over the weekend. Yellow on the page, counted in "needing attention", emailed once.
 - The same run also collects, per client, the refresh history of the Power BI models listed under `PowerBI` in `CLIENTS_JSON`
   (`out/powerbi.csv` = last refresh per model, `out/powerbi-runs.csv` = every refresh of the window, aggregated per day into
   `pbidays` for the Power BI tab's recap and the weekly mail) and, for every listed environment, the canvas apps and connections
@@ -68,11 +71,13 @@ from `CARRY_URL` only, i.e. from the Azure function, even on the days SEMO's Con
 | `SMTP_PASSWORD` | its app password                                                                           |
 | `MAIL_TO`       | recipient(s), comma-separated                                                              |
 | `SMTP_HOST`     | optional, default `smtp.gmail.com`; port 587 with STARTTLS                                 |
+| `HEALTHCHECK_URL` | optional, a healthchecks.io ping URL (check period 10 min, grace 1 h): the job pings it after every successful run, so the service emails when the job stops running at all. The Azure function has its own check through its `HEALTHCHECK_URL` app setting (period 15 min). |
 
 ## Email alerts
 
 `notify.ps1` runs after each deploy. It emails one message per run listing the flows whose latest run has **newly**
-failed (a flow that keeps failing is announced once, until it recovers), and one weekly recap on Monday after 07:00
+failed (a flow that keeps failing is announced once, until it recovers), with the run's error text and a link to the failed run,
+one message for flows that went **silent** (announced once per silence), and one weekly recap on Monday after 07:00
 Eastern with the last 7 days' totals per client, every flow that failed in the week and the Helpdesk tickets in progress (those past
 SLA named). No recap on Monday morning =
 the job itself is broken. `gh workflow run watch.yml -f digest=true` sends a sample recap right away.

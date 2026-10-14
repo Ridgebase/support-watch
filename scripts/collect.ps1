@@ -86,6 +86,8 @@ foreach ($c in $clients) {
             $flow = $_; $api = $using:api; $ver = $using:ver; $h = $using:h; $since = $using:since; $tz = $using:tz; $envId = ($using:env)['name']
             $fd = ($using:c).FlowDays; $fdName = $flow['properties']['displayName']; if ($fd -and $fd.$fdName) { $since = ($using:nowUtc).AddDays(-$fd.$fdName) }
             $utc = { param($s) [datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
+            # A failed run's error as the API reports it, "code: message" (e.g. "ActionFailed: An action failed. No dependent actions succeeded."), one line, capped.
+            $err = { param($e) if (-not $e) { return '' }; $m = "$($e['code']): $($e['message'])".Trim(': ') -replace '\s+', ' '; if ($m.Length -gt 400) { $m.Substring(0, 400) + '...' } else { $m } }
             $start = "$api/environments/$envId/flows/$($flow['name'])/runs?$ver"; $runs = @(); $status = $null
             # A timeout throws (-MaximumRetryCount only covers HTTP error codes), so a flow gets a second full attempt before it is UNREADABLE.
             foreach ($attempt in 1, 2) {
@@ -104,10 +106,10 @@ foreach ($c in $clients) {
             $base = @{ Flow = $flow['properties']['displayName']; FlowId = $flow['name']; Enabled = ($flow['properties']['state'] -eq 'Started'); Trigger = $tr }
             if ($status)             { [pscustomobject]($base + @{ Start = ''; Status = $status }) }
             elseif ($runs.Count -eq 0) { [pscustomobject]($base + @{ Start = ''; Status = 'NO_RUNS' }) }
-            else { foreach ($run in $runs) { [pscustomobject]($base + @{ Start = [TimeZoneInfo]::ConvertTimeFromUtc((& $utc $run['properties']['startTime']), $tz).ToString('s'); Status = $run['properties']['status'] }) } }
+            else { foreach ($run in $runs) { [pscustomobject]($base + @{ Start = [TimeZoneInfo]::ConvertTimeFromUtc((& $utc $run['properties']['startTime']), $tz).ToString('s'); Status = $run['properties']['status']; RunId = $run['name']; Error = (& $err $run['properties']['error']) }) } }
         }
         foreach ($fr in $flowRows) {
-            $rows.Add([pscustomobject]@{ Collected = $collected; Client = $c.Name; Environment = $env['properties']['displayName']; EnvironmentId = $env['name']; Flow = $fr.Flow; FlowId = $fr.FlowId; Enabled = $fr.Enabled; Trigger = $fr.Trigger; Start = $fr.Start; Status = $fr.Status })
+            $rows.Add([pscustomobject]@{ Collected = $collected; Client = $c.Name; Environment = $env['properties']['displayName']; EnvironmentId = $env['name']; Flow = $fr.Flow; FlowId = $fr.FlowId; Enabled = $fr.Enabled; Trigger = $fr.Trigger; Start = $fr.Start; Status = $fr.Status; RunId = "$($fr.RunId)"; Error = "$($fr.Error)" })
         }
     }
     } catch {
