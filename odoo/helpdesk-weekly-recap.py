@@ -53,7 +53,7 @@ for c, to in targets.items():
     table += (head('Solved this week', ['Ticket', 'Subject', 'Stage', 'Closed']) + solved + '</table>') if solved else ''
     # Projects: the active projects whose Customer is this client. One row per project: status (the last project update), open tasks,
     # overdue tasks (deadline before today, not closed), tasks done this week, next milestone (red when past its deadline); the overdue tasks named below.
-    prow = ''; overdue_names = []
+    prow = ''; overdue_names = []; n_proj = 0; n_open_k = 0; n_overdue = 0
     for p in Project.search([('partner_id', '!=', False)]).filtered(lambda p: (p.partner_id.commercial_partner_id.name or '') == c):
         tasks = Task.search([('project_id', '=', p.id)])
         open_k = tasks.filtered(lambda t: not t.is_closed)
@@ -65,11 +65,16 @@ for c, to in targets.items():
         prow += '<tr><td style="padding:6px 0;border-top:1px solid #e4ded7"><a href="%s%s" style="color:#043f45">%s</a></td><td style="%s;color:%s;font-weight:600">%s</td><td style="%s">%d</td><td style="%s;color:%s">%d</td><td style="%s">%d</td><td style="%s">%s</td></tr>' % (
             base, p.get_portal_url(), esc(p.name), cell, st[1], st[0], cell, len(open_k), cell, BAD if overdue else '#262e3a', len(overdue), cell, len(done_k), cell, mile)
         overdue_names += ['%s: %s (%s)' % (esc(p.name), esc(t.name), str(t.date_deadline)[:10]) for t in overdue.sorted('date_deadline')]
+        n_proj += 1; n_open_k += len(open_k); n_overdue += len(overdue)
+    # The Projects card is separate from the Helpdesk one, and absent when the client has no project.
+    pcard = ''
     if prow:
-        table += head('Projects', ['Project', 'Status', 'Open tasks', 'Overdue', 'Done this week', 'Next milestone']) + prow + '</table>'
-        if overdue_names:
-            table += '<div style="color:%s;font-size:12px;margin-top:8px">Overdue: %s</div>' % (BAD, ' &middot; '.join(overdue_names))
+        ppill = ('<span style="background:#fdecee;color:%s;padding:2px 8px;border-radius:10px;font-size:12px">%d overdue</span>' % (BAD, n_overdue)) if n_overdue else ('<span style="background:#e9f3ee;color:%s;padding:2px 8px;border-radius:10px;font-size:12px">On track</span>' % OK)
+        pline = '<b>%d</b> project%s &middot; <b>%d</b> open tasks' % (n_proj, 's' if n_proj > 1 else '', n_open_k)
+        plate = ('<div style="color:%s;font-size:12px;margin-top:8px">Overdue: %s</div>' % (BAD, ' &middot; '.join(overdue_names))) if overdue_names else ''
+        pcard = '<div style="background:#fff;border:1px solid #e4ded7;border-radius:8px;padding:16px 18px;margin-top:14px"><div style="font-size:16px;font-weight:600;margin-bottom:6px">Projects &nbsp;%s</div><div>%s</div>%s%s</div>' % (
+            ppill, pline, head('Projects', ['Project', 'Status', 'Open tasks', 'Overdue', 'Done this week', 'Next milestone']) + prow + '</table>', plate)
     subject = '[Ridgebase Support] %s, weekly recap %s to %s: %d open%s' % (c, week_ago.strftime('%Y-%m-%d'), now.strftime('%Y-%m-%d'), len(open_t), (', %d past SLA' % len(late)) if late else '')
-    body = '<html><body style="margin:0;padding:24px;background:#f8f7f5;font:14px/1.45 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#262e3a"><div style="max-width:720px;margin:0 auto"><div style="color:%s;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em">Ridgebase &middot; Support</div><h1 style="font:400 26px/1.15 Palatino Linotype,Palatino,Georgia,serif;margin:2px 0 16px">%s, weekly recap</h1><div style="background:#fff;border:1px solid #e4ded7;border-radius:8px;padding:16px 18px"><div style="font-size:16px;font-weight:600;margin-bottom:6px">%s to %s &nbsp;%s</div><div>%s</div>%s</div><div style="color:%s;font-size:12px;margin-top:16px">Sent every Monday by Ridgebase Support &middot; <a href="%s/my/tickets" style="color:%s">All your tickets</a></div></div></body></html>' % (
-        BAD, esc(c), week_ago.strftime('%Y-%m-%d'), now.strftime('%Y-%m-%d'), pill, line, table, MUTED, base, MUTED)
+    body = '<html><body style="margin:0;padding:24px;background:#f8f7f5;font:14px/1.45 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#262e3a"><div style="max-width:720px;margin:0 auto"><div style="color:%s;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em">Ridgebase &middot; Support</div><h1 style="font:400 26px/1.15 Palatino Linotype,Palatino,Georgia,serif;margin:2px 0 16px">%s, weekly recap</h1><div style="background:#fff;border:1px solid #e4ded7;border-radius:8px;padding:16px 18px"><div style="font-size:16px;font-weight:600;margin-bottom:6px">Helpdesk, %s to %s &nbsp;%s</div><div>%s</div>%s</div>%s<div style="color:%s;font-size:12px;margin-top:16px">Sent every Monday by Ridgebase Support &middot; <a href="%s/my/tickets" style="color:%s">All your tickets</a></div></div></body></html>' % (
+        BAD, esc(c), week_ago.strftime('%Y-%m-%d'), now.strftime('%Y-%m-%d'), pill, line, table, pcard, MUTED, base, MUTED)
     env['mail.mail'].sudo().create({'subject': subject, 'body_html': body, 'email_to': to, 'auto_delete': True})
