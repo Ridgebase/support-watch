@@ -78,7 +78,7 @@
   tr.bad  { background:var(--badbg); }
   tr.warn, tr.silent, tr.stuck { background:var(--warnbg); }
   tr.ok   { background:var(--okbg); }
-  tr.off  { color:var(--muted); }
+  tr.off, tr.known { color:var(--muted); }   /* known: a failure acknowledged in state/known.json */
   button.copy { border:0; background:none; color:var(--muted); padding:0; margin-left:6px; cursor:pointer; font-size:12px; line-height:18px; height:18px; display:inline-flex; align-items:center; vertical-align:middle; }
   button.copy:hover { color:var(--accent); }
   @media (max-width: 700px) { .stat, .last { border-left:0; padding-left:0; text-align:left; } }
@@ -102,14 +102,15 @@
 const data = __DATA__;
 const STALE_MS = 3600e3;   // the collector runs every 10 min; an hour without a snapshot means it is down
 const latest = data.snapshots;
-const summary = data.flows.map(f => ({ client:f.Client, env:f.Environment, flow:f.Flow, enabled:String(f.Enabled).toLowerCase() !== 'false', trigger:f.Trigger || '', runs:+f.Runs, failed:+f.Failed, last:f.Last || '', lastStatus:f.LastStatus, lastError:f.LastError || '', lastRun:f.LastFailedRun || '', silent:String(f.Silent).toLowerCase() === 'true', gap:+f.Gap || 0, stuck:+f.Stuck || 0, stuckSince:f.StuckSince || '',
+const summary = data.flows.map(f => ({ client:f.Client, env:f.Environment, flow:f.Flow, enabled:String(f.Enabled).toLowerCase() !== 'false', trigger:f.Trigger || '', runs:+f.Runs, failed:+f.Failed, last:f.Last || '', lastStatus:f.LastStatus, lastError:f.LastError || '', lastRun:f.LastFailedRun || '', silent:String(f.Silent).toLowerCase() === 'true', gap:+f.Gap || 0, stuck:+f.Stuck || 0, stuckSince:f.StuckSince || '', known:f.Known || '',
   url: f.EnvironmentId && f.FlowId ? `https://make.powerautomate.com/environments/${f.EnvironmentId}/flows/${f.FlowId}/details` : '' }));
 const sum = (arr, k) => arr.reduce((n, r) => n + (+r[k] || 0), 0);
 // Colour = what the last run says. Red: last run failed. Yellow: recovered, but failures in the window. UNREADABLE (API timeout) is neutral: a collector hiccup, not a flow problem.
 // Silent (yellow too): a recurrence flow that stopped running without failing (build-dashboard.ps1 sets Silent from the longest gap between its runs this week).
 // Green: no failure in the window. Disabled flows are muted, flows with 0 runs are neutral (and hidden by default).
 // Stuck (yellow): a run still Running after 2 h (build-dashboard.ps1 sets Stuck).
-const cls = f => !f.enabled ? 'off' : f.lastStatus === 'Failed' ? 'bad' : f.stuck ? 'stuck' : f.silent ? 'silent' : f.failed > 0 ? 'warn' : f.runs > 0 ? 'ok' : '';
+// Known (muted): the failure is acknowledged in state/known.json (build-dashboard.ps1 sets Known to the note); stuck and silent still show.
+const cls = f => !f.enabled ? 'off' : f.lastStatus === 'Failed' && !f.known ? 'bad' : f.stuck ? 'stuck' : f.silent ? 'silent' : f.failed > 0 && !f.known ? 'warn' : f.known && f.failed > 0 ? 'known' : f.runs > 0 ? 'ok' : '';
 const problem = f => ['bad', 'stuck', 'silent', 'warn'].includes(cls(f));
 const ago = min => min < 1 ? 'under a minute' : min < 90 ? Math.round(min) + ' min' : min < 36 * 60 ? (min / 60).toFixed(1).replace(/\.0$/, '') + ' h' : (min / 1440).toFixed(1).replace(/\.0$/, '') + ' d';
 const stuckWhy = f => `${f.stuck > 1 ? f.stuck + ' runs' : 'A run'} still running since ${fmt(f.stuckSince)} (${ago((new Date(latest[f.client]) - new Date(f.stuckSince)) / 60e3)}); no flow should take 2 h`;
@@ -287,11 +288,11 @@ function render() {
 
   // Power Automate tab. A selected customer with no flow at all (a helpdesk-only customer) gets the Power BI tab's kind of empty message, not a Waiting card.
   if (client && !summary.some(f => f.client === client)) { document.getElementById('out').innerHTML = '<p class="muted">No Power Automate flow to show.</p>'; return; }
-  h += health(client);  const rank = { bad: 0, stuck: 1, silent: 2, warn: 3, ok: 4, '': 5, off: 6 };
+  h += health(client);  const rank = { bad: 0, stuck: 1, silent: 2, warn: 3, known: 4, ok: 5, '': 6, off: 7 };
   const list = summary.filter(f => (!client || f.client === client) && (!only || problem(f)) && (!hideQuiet || f.runs > 0))
     .sort((a, b) => rank[cls(a)] - rank[cls(b)] || b.failed - a.failed || a.client.localeCompare(b.client) || a.flow.localeCompare(b.flow));
   h += `<h2 id="flows">Flows <span class="muted">(${list.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Flow</th><th>Enabled</th><th class="num">Runs</th><th class="num">Failed</th><th>Last run</th><th>Last status</th></tr></thead><tbody>`;
-  for (const f of list) h += `<tr class="${cls(f)}"><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td class="flow">${esc(f.flow)}${copyBtn(f.url)}</td><td>${f.enabled ? 'Yes' : 'No'}</td><td class="num">${f.runs}</td><td class="num" title="${esc(f.lastError)}">${f.failed}</td><td>${fmt(f.last)}</td><td class="${statusClass(f.lastStatus)}" title="${esc(f.lastError)}">${esc(f.lastStatus)}${cls(f) === 'silent' ? ` <b class="c-warn" title="${esc(silentWhy(f))}">silent</b>` : ''}${cls(f) === 'stuck' ? ` <b class="c-warn" title="${esc(stuckWhy(f))}">stuck</b>` : ''}</td></tr>`;
+  for (const f of list) h += `<tr class="${cls(f)}"><td>${esc(f.client)}</td><td>${esc(f.env)}</td><td class="flow">${esc(f.flow)}${copyBtn(f.url)}</td><td>${f.enabled ? 'Yes' : 'No'}</td><td class="num">${f.runs}</td><td class="num" title="${esc(f.lastError)}">${f.failed}</td><td>${fmt(f.last)}</td><td class="${statusClass(f.lastStatus)}" title="${esc(f.lastError)}">${esc(f.lastStatus)}${cls(f) === 'silent' ? ` <b class="c-warn" title="${esc(silentWhy(f))}">silent</b>` : ''}${cls(f) === 'stuck' ? ` <b class="c-warn" title="${esc(stuckWhy(f))}">stuck</b>` : ''}${cls(f) === 'known' ? ` <b title="${esc(f.known)}">known</b>` : ''}</td></tr>`;
   h += '</tbody></table></div>';
 
   // One row per flow and error, newest first, with the number of runs: a flow failing every 30 min for a day is one line, not 48.
@@ -301,14 +302,14 @@ function render() {
     const k = [r.Client, r.Environment, r.Flow, r.Error || ''].join(' '), g = groups.get(k);
     if (g) { g.n++; g.first = r.Start; } else groups.set(k, { ...r, n: 1, first: r.Start });
   }
-  const fails = [...groups.values()].slice(0, 50);
+  const fails = [...groups.values()].sort((a, b) => !!a.Known - !!b.Known).slice(0, 50);   // acknowledged errors last, newest first within each half
   if (fails.length) {
-    h += `<h2 id="failed">Failed runs <span class="muted">(last 7 days)</span></h2><div class="card wrap"><table><thead><tr><th>Last failure</th><th>Client</th><th>Environment</th><th>Flow</th><th class="num">Runs</th><th>Error</th></tr></thead><tbody>`;
+    h += `<h2 id="failed">Failed runs <span class="muted">(last 7 days)</span></h2><div class="card wrap"><table><thead><tr><th>Last failure</th><th title="Within the last 7 days">First failure</th><th>Client</th><th>Environment</th><th>Flow</th><th class="num">Runs</th><th>Error</th></tr></thead><tbody>`;
     // Failed-run rows carry no flow id: take the URL from the matching flow in the summary; with the run id the copy button copies the newest failed run's URL (no link: the clients live in other browser profiles).
     const urlOf = r => (summary.find(f => f.client === r.Client && f.env === r.Environment && f.flow === r.Flow) || {}).url;
     const runUrl = r => { const u = urlOf(r); return u && r.RunId ? `${u.replace(/\/details$/, '')}/runs/${r.RunId}` : u; };
     const errCell = r => /^ActionFailed: /.test(r.Error || '') ? `<span class="muted" title="Only a flow's 30 newest failed runs are inspected for the failed action's error; these are older, or their actions could not be read.">not inspected</span>` : esc(r.Error || '');
-    for (const r of fails) h += `<tr><td title="${r.n > 1 ? `First: ${fmt(r.first)}` : ''}">${fmt(r.Start)}</td><td>${esc(r.Client)}</td><td>${esc(r.Environment)}</td><td class="flow">${esc(r.Flow)}${copyBtn(runUrl(r))}</td><td class="num">${r.n}</td><td class="text">${errCell(r)}</td></tr>`;
+    for (const r of fails) h += `<tr class="${r.Known ? 'known' : ''}"><td>${fmt(r.Start)}</td><td>${fmt(r.first)}</td><td>${esc(r.Client)}</td><td>${esc(r.Environment)}</td><td class="flow">${esc(r.Flow)}${copyBtn(runUrl(r))}</td><td class="num">${r.n}</td><td class="text">${errCell(r)}${r.Known ? ` <b title="${esc(r.Known)}">known</b>` : ''}</td></tr>`;
     h += '</tbody></table></div>';
   }
   // Flows whose run history the collector could not read (Flow API 503/504 on every retry). Not a flow problem: the

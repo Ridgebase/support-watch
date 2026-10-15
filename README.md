@@ -29,7 +29,9 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   **silent** flows: an enabled recurrence flow whose last run is older than 1.5x the longest gap between two of its runs this week
   (3 runs needed), i.e. a schedule that stopped without failing. A flow with no weekend run is measured in weekday time, so a
   weekday schedule is not silent over the weekend. Yellow on the page, counted in "needing attention", emailed once. Same for
-  **stuck** runs: a run still Running after 2 hours.
+  **stuck** runs: a run still Running after 2 hours. A failure you have acknowledged goes in `state/known.json` (hand-edited, committed):
+  `[{"Client":"SEMO","Flow":"<flow name>","Error":"<optional substring of the error>","Note":"<why>","Until":"2026-12-31"}]`; a matching flow
+  shows muted with the note on hover, leaves "needing attention", and is not emailed; `Until` (optional) expires the entry.
 - The same run also collects, per client, the refresh history of the Power BI models listed under `PowerBI` in `CLIENTS_JSON`
   (`out/powerbi.csv` = last refresh per model, `out/powerbi-runs.csv` = every refresh of the window, aggregated per day into
   `pbidays` for the Power BI tab's recap and the weekly mail) and, for every listed environment, the canvas apps and connections

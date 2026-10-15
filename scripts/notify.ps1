@@ -56,7 +56,7 @@ $failing = @($d.flows | Where-Object { $_.LastStatus -eq 'Failed' -and "$($_.Ena
 $failed  = @($d.flows | Where-Object { $_.LastFailed -and "$($_.Enabled)".ToLower() -ne 'false' })                 # any failure in the window
 $key     = { param($f) "$($f.Client)|$($f.FlowId)" }
 $iso     = { param($s) if ($s -is [datetime]) { $s.ToString('s') } else { "$s" } }   # pwsh 7 parses JSON dates into [datetime]; compare as ISO strings on both engines
-$new     = @($failed | Where-Object { $k = & $key $_; -not $open.ContainsKey($k) -or (& $iso $_.LastFailed) -gt (& $iso $open[$k]) })
+$new     = @($failed | Where-Object { $k = & $key $_; -not $_.Known -and (-not $open.ContainsKey($k) -or (& $iso $_.LastFailed) -gt (& $iso $open[$k])) })   # Known (state/known.json): acknowledged, still tracked in $open so it is not re-announced when the entry expires
 $prev = $open; $open = @{}; foreach ($f in $failed) { $open[(& $key $f)] = & $iso $f.LastFailed }   # flows whose failures left the 7-day window drop out silently
 # An UNREADABLE flow's runs are unknown for this snapshot, not clean: keep what was announced for it, or its old failure is re-announced once the flow is readable again (happened 2026-10-05).
 foreach ($f in @($d.flows | Where-Object LastStatus -eq 'UNREADABLE')) { $k = & $key $f; if ($prev.ContainsKey($k)) { $open[$k] = $prev[$k] } }

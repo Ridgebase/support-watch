@@ -24,6 +24,12 @@ $tickets = @(if (Test-Path $TicketsCsv) { @(Import-Csv $TicketsCsv) } else { @()
 $pbiRuns = @(if (Test-Path $PbiRunsCsv) { @(Import-Csv $PbiRunsCsv) } else { @() })   # one row per Power BI refresh in the window, from collect.ps1
 $pbidays = @(); $pbifails = @()
 $stuckAfterMin = 120   # a run still Running after this is stuck (the user's call: no flow legitimately takes 2 h)
+# Known failures: state/known.json, hand-edited, [{ "Client", "Flow", "Error" (optional: a substring of the error), "Note", "Until" (optional date) }].
+# A failing flow or a failed run whose error matches gets Known = the note: muted on the page, out of "needing attention" and of the failure emails.
+# Applied after the carry merge: the SEMO function has no state/ (it fetches three files from main), the GitHub job sees every client.
+$knownFile = "$PSScriptRoot/../state/known.json"
+$known = @(@(if (Test-Path $knownFile) { Get-Content $knownFile -Raw -Encoding UTF8 | ConvertFrom-Json } else { @() }) | Where-Object { -not $_.Until -or [datetime]$_.Until -ge (Get-Date).Date })
+$knownNote = { param($client, $flow, $err) foreach ($k in $known) { if ($k.Client -eq $client -and $k.Flow -eq $flow -and (-not $k.Error -or "$err".ToLower().Contains("$($k.Error)".ToLower()))) { return "$($k.Note)" } }; '' }
 # Weekday clock for silent-flow detection: minutes since 2000-01-03 (a Monday) with Saturdays and Sundays removed; a weekend instant counts as Friday midnight.
 $bizMin = { param([datetime]$d) $dow = [int]$d.DayOfWeek; $wk = [math]::Floor(($d.Date - [datetime]'2000-01-03').TotalDays / 7)
     $wd = if ($dow -in 0, 6) { 5 } else { $dow - 1 }; $tod = if ($dow -in 0, 6) { 0 } else { ($d - $d.Date).TotalMinutes }; ($wk * 5 + $wd) * 1440 + $tod }
@@ -88,6 +94,9 @@ if (Test-Path $Carry) {
     foreach ($p in $c.snapshots.PSObject.Properties) { $snapshots[$p.Name] = $p.Value }
     $flows += @($c.flows); $days += @($c.days); $fails += @($c.fails); $powerbi += @($c.powerbi); $pbidays += @($c.pbidays); if ($c.pbifails) { $pbifails += @($c.pbifails) }; $apps += @($c.apps); $conns += @($c.connections)
 }
+
+foreach ($f in $flows) { $f | Add-Member -NotePropertyName Known -NotePropertyValue (& $knownNote $f.Client $f.Flow $f.LastError) -Force }
+foreach ($r in $fails) { $r | Add-Member -NotePropertyName Known -NotePropertyValue (& $knownNote $r.Client $r.Flow $r.Error) -Force }
 
 $data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi; pbidays = $pbidays; pbifails = $pbifails; apps = $apps; connections = $conns; tickets = $tickets; helpdesk = $HelpdeskAt } | ConvertTo-Json -Depth 5 -Compress
 $data = $data.Replace('</', '<\/')   # a "</script>" inside any text (a connection error, a flow name) would end the page's data script; "<\/" is the same string in JSON
