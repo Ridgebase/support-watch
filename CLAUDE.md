@@ -29,6 +29,9 @@ README.md says what the system is and how it runs. This file is what to know bef
 
 - The workflow bot commits `state/` every 10 min: `git pull --rebase` right before `git push`, or the push is rejected.
 - A dispatched run (`gh workflow run watch.yml`) is the quickest way to see a change live; watch it with `gh run watch <id>`.
+- To run the SEMO function now instead of waiting for its timer: `$key = az functionapp keys list -g rg-support-watch -n func-support-watch-semo --subscription "Microsoft Azure Sponsorship #1" --query masterKey -o tsv`,
+  then `Invoke-WebRequest -Method Post -Uri https://func-support-watch-semo.azurewebsites.net/admin/functions/collect-semo -Headers @{'x-functions-key'=$key;'Content-Type'='application/json'} -Body '{"input":""}'`
+  (HTTP 202; the gist is updated about a minute later), then dispatch the workflow so the page reads the new gist.
 
 ## Rules the user set
 
