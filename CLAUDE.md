@@ -45,8 +45,6 @@ README.md says what the system is and how it runs. This file is what to know bef
 - Failed runs: the run's own error is always the same banner, so the collector reads the failed action and its outputs for a flow's
   30 newest failed runs (two extra API calls each); older ones keep the banner and the page groups them as "not inspected".
 - Stuck runs: a run still Running after 2 h (`$stuckAfterMin` in build-dashboard.ps1). The user knows the flows: none legitimately takes that long.
-- Known failures: `state/known.json` is read by build-dashboard.ps1 after the carry merge (the SEMO function fetches no `state/`), so the
-  GitHub job annotates every client's flows and failed runs with `Known`; the page and notify.ps1 only read that field.
 - Stale clients: notify.ps1 emails once per episode when a client's snapshot is over an hour old; "already announced" checks compare with the saved state ($prev), never with the state rebuilt for the run.
 - Silent flows: recurrence flows only, 1.5x the longest gap between runs this week, measured on a weekday clock when the flow never ran on
   a weekend. The flag lasts a week at most because the window is 7 days; a Monday holiday produces a false positive that afternoon.
