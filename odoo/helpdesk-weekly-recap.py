@@ -12,7 +12,7 @@
 # Sandbox notes: no imports (datetime and dateutil are provided), no f-strings, lambdas only.
 
 RECIPIENTS = {
-    # 'Séguin Morris Inc': 'someone@seguinmorris.com',
+    'Séguin Morris Inc': 'adrien.polselli@ridgebase.com',
 }
 tz = dateutil.tz.gettz('America/Toronto')
 now = datetime.datetime.now()
@@ -58,7 +58,7 @@ for c, to in targets.items():
         tasks = Task.search([('project_id', '=', p.id)])
         open_k = tasks.filtered(lambda t: not t.is_closed)
         overdue = open_k.filtered(lambda t: t.date_deadline and str(t.date_deadline)[:10] < today)
-        done_k = tasks.filtered(lambda t: t.is_closed and t.date_end and str(t.date_end)[:10] >= week_ago.strftime('%Y-%m-%d'))
+        done_k = tasks.filtered(lambda t: t.is_closed and t.date_last_stage_update and str(t.date_last_stage_update)[:10] >= week_ago.strftime('%Y-%m-%d'))   # date_end stays empty on a task marked done, the stage date does not
         nxt = p.milestone_ids.filtered(lambda m: not m.is_reached).sorted('deadline')[:1]
         st = STATUS.get(p.last_update_status, (p.last_update_status or '', MUTED))
         mile = ('<span style="color:%s">%s%s</span>' % (BAD if nxt.is_deadline_exceeded else '#262e3a', esc(nxt.name), (' (%s)' % nxt.deadline) if nxt.deadline else '')) if nxt else '&mdash;'
