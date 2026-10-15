@@ -1,4 +1,5 @@
-# Odoo scheduled action: weekly Helpdesk recap per client, one mail per client with only that client's tickets.
+# Odoo scheduled action: weekly recap per client, one mail per client with only that client's tickets and projects
+# (a project belongs to a client through its Customer field; projects without a customer are never listed).
 # Runs inside Odoo Online (ridg-support-new.odoo.com, saas 19.4), no external tool: Settings > Technical > Automation >
 # Scheduled Actions (developer mode): Model Helpdesk Ticket, every 1 Weeks, next execution Monday 11:00 UTC (07:00 Eastern
 # in summer), Action to do: Execute Code, this code.
@@ -21,8 +22,12 @@ day = lambda d: d.replace(tzinfo=dateutil.tz.UTC).astimezone(tz).strftime('%Y-%m
 esc = lambda s: (s or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 base = env['ir.config_parameter'].sudo().get_param('web.base.url')
 PRIO = {'0': 'Low', '1': 'Medium', '2': 'High', '3': 'Urgent'}
-BAD, OK, MUTED = '#e95664', '#3c8274', '#76706a'
+BAD, OK, WARN, MUTED = '#e95664', '#3c8274', '#c2641a', '#76706a'
+STATUS = {'on_track': ('On track', OK), 'at_risk': ('At risk', WARN), 'off_track': ('Off track', BAD), 'on_hold': ('On hold', MUTED), 'done': ('Done', OK), 'to_define': ('Not set', MUTED)}
+today = now.strftime('%Y-%m-%d')
 Ticket = env['helpdesk.ticket'].sudo()
+Project = env['project.project'].sudo()
+Task = env['project.task'].sudo()
 client_of = lambda t: (t.commercial_partner_id.name or t.partner_company_name or '')
 only = env.context.get('weekly_client')
 targets = {only: env.context.get('weekly_to')} if only else RECIPIENTS
@@ -46,6 +51,24 @@ for c, to in targets.items():
     head = lambda title, cols: '<div style="color:%s;font-size:12px;margin-top:14px">%s</div><table style="width:100%%;border-collapse:collapse;font-size:13px;margin-top:6px"><tr style="color:%s;font-size:11px;text-transform:uppercase;letter-spacing:.06em">%s</tr>' % (MUTED, title, MUTED, ''.join(['<td style="padding:0 8px">%s</td>' % x for x in cols]))
     table = (head('Open tickets', ['Ticket', 'Subject', 'Stage', 'Priority', 'Handled by', 'Opened', 'SLA deadline']) + rows + '</table>') if rows else ('<div style="color:%s;margin-top:10px">No open ticket</div>' % MUTED)
     table += (head('Solved this week', ['Ticket', 'Subject', 'Stage', 'Closed']) + solved + '</table>') if solved else ''
+    # Projects: the active projects whose Customer is this client. One row per project: status (the last project update), open tasks,
+    # overdue tasks (deadline before today, not closed), tasks done this week, next milestone (red when past its deadline); the overdue tasks named below.
+    prow = ''; overdue_names = []
+    for p in Project.search([('partner_id', '!=', False)]).filtered(lambda p: (p.partner_id.commercial_partner_id.name or '') == c):
+        tasks = Task.search([('project_id', '=', p.id)])
+        open_k = tasks.filtered(lambda t: not t.is_closed)
+        overdue = open_k.filtered(lambda t: t.date_deadline and str(t.date_deadline)[:10] < today)
+        done_k = tasks.filtered(lambda t: t.is_closed and t.date_end and str(t.date_end)[:10] >= week_ago.strftime('%Y-%m-%d'))
+        nxt = p.milestone_ids.filtered(lambda m: not m.is_reached).sorted('deadline')[:1]
+        st = STATUS.get(p.last_update_status, (p.last_update_status or '', MUTED))
+        mile = ('<span style="color:%s">%s%s</span>' % (BAD if nxt.is_deadline_exceeded else '#262e3a', esc(nxt.name), (' (%s)' % nxt.deadline) if nxt.deadline else '')) if nxt else '&mdash;'
+        prow += '<tr><td style="padding:6px 0;border-top:1px solid #e4ded7"><a href="%s%s" style="color:#043f45">%s</a></td><td style="%s;color:%s;font-weight:600">%s</td><td style="%s">%d</td><td style="%s;color:%s">%d</td><td style="%s">%d</td><td style="%s">%s</td></tr>' % (
+            base, p.get_portal_url(), esc(p.name), cell, st[1], st[0], cell, len(open_k), cell, BAD if overdue else '#262e3a', len(overdue), cell, len(done_k), cell, mile)
+        overdue_names += ['%s: %s (%s)' % (esc(p.name), esc(t.name), str(t.date_deadline)[:10]) for t in overdue.sorted('date_deadline')]
+    if prow:
+        table += head('Projects', ['Project', 'Status', 'Open tasks', 'Overdue', 'Done this week', 'Next milestone']) + prow + '</table>'
+        if overdue_names:
+            table += '<div style="color:%s;font-size:12px;margin-top:8px">Overdue: %s</div>' % (BAD, ' &middot; '.join(overdue_names))
     subject = '[Ridgebase Support] %s, weekly recap %s to %s: %d open%s' % (c, week_ago.strftime('%Y-%m-%d'), now.strftime('%Y-%m-%d'), len(open_t), (', %d past SLA' % len(late)) if late else '')
     body = '<html><body style="margin:0;padding:24px;background:#f8f7f5;font:14px/1.45 -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#262e3a"><div style="max-width:720px;margin:0 auto"><div style="color:%s;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em">Ridgebase &middot; Support</div><h1 style="font:400 26px/1.15 Palatino Linotype,Palatino,Georgia,serif;margin:2px 0 16px">%s, weekly recap</h1><div style="background:#fff;border:1px solid #e4ded7;border-radius:8px;padding:16px 18px"><div style="font-size:16px;font-weight:600;margin-bottom:6px">%s to %s &nbsp;%s</div><div>%s</div>%s</div><div style="color:%s;font-size:12px;margin-top:16px">Sent every Monday by Ridgebase Support &middot; <a href="%s/my/tickets" style="color:%s">All your tickets</a></div></div></body></html>' % (
         BAD, esc(c), week_ago.strftime('%Y-%m-%d'), now.strftime('%Y-%m-%d'), pill, line, table, MUTED, base, MUTED)

@@ -99,7 +99,8 @@ otify.ps1 -DryRun` prints the emails and the state it would save.
 
 `odoo/helpdesk-weekly-recap.py` is the code of the Odoo scheduled action "Helpdesk: weekly recap per client" (Settings > Technical >
 Scheduled Actions, every Monday 07:00 Eastern, created 2026-10-15): one mail per client listed in its `RECIPIENTS` block with that
-client's open tickets (SLA deadline in red when missed) and the tickets solved in the week, portal links. No client listed, no mail.
+client's open tickets (SLA deadline in red when missed), the tickets solved in the week and the projects whose Customer is that client
+(status of the last project update, open and overdue tasks, tasks done in the week, next milestone), portal links. No client listed, no mail.
 It runs entirely in Odoo; this repo only keeps the code under version control, paste it into the action after a change.
 
 ## Why refresh tokens
