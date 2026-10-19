@@ -96,6 +96,18 @@ if ($staleNew) {
     $mails += @{ subject = "$(if ($SampleOps) { '[Sample] ' })[Support Watch] $(($staleNew | ForEach-Object { "$($_.Client): no data for $($_.Hours) h" }) -join ', ')"
                  body    = & $wrap 'The job log on GitHub Actions (or the function log) names the error' "$($staleNew.Count) client$(if ($staleNew.Count -gt 1) { 's' }) not collected" ($cards -join '') }
 }
+# Credentials with a fixed expiry (data.expiries, dates from EXPIRIES in watch.yml): one mail 14 days ahead and one once expired, per date. Renewing means
+# a new date in watch.yml, which is a new key value, so the next cycle is announced too.
+$expSoon = @(foreach ($e in @($d.expiries)) { $date = ([datetime]$e.Date).ToString('yyyy-MM-dd'); $days = ([datetime]$date - $now.Date).Days; if ($days -lt 14) { [pscustomobject]@{ Name = $e.Name; Date = $date; Days = $days; Phase = if ($days -lt 0) { 'expired' } else { 'soon' } } } })
+$expNew  = @(if (-not $Sample -and -not $SampleDigest -and -not $SampleOps) { $expSoon | Where-Object { "$($prev["expiry|$($_.Name)"])" -ne "$($_.Phase)|$($_.Date)" } })
+foreach ($e in $expSoon) { $open["expiry|$($e.Name)"] = "$($e.Phase)|$($e.Date)" }
+if ($expNew) {
+    $cards = foreach ($e in $expNew) {
+        & $card "$(& $esc $e.Name) $(& $pill $(if ($e.Phase -eq 'expired') { 'expired' } else { "$($e.Days) days left" }) $col.bad $col.badbg)" "<div>Expires $($e.Date). Renew it, store the new secret, then update its date in EXPIRIES (.github/workflows/watch.yml).</div>"
+    }
+    $mails += @{ subject = "[Support Watch] Credential $(if ($expNew | Where-Object Phase -eq 'expired') { 'expired' } else { 'expiring' }): $(($expNew | ForEach-Object { $_.Name }) -join ', ')"
+                 body    = & $wrap 'When it expires the collector stops and the page goes STALE' "$($expNew.Count) credential$(if ($expNew.Count -gt 1) { 's' }) to renew" ($cards -join '') }
+}
 $silentRow = { param($f) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>$(& $esc $f.Flow)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $f.Environment) &middot; no run for $(& $every (& $sinceMin $f)) &middot; last run $(& $fmt $f.Last) $(& $esc $f.LastStatus) &middot; longest gap this week $(& $every $f.Gap) &middot; $($f.Runs) runs in 7 days</span>" +
                            "<div style=""margin-top:6px;font:11px/1.4 Consolas,Menlo,monospace;color:$($col.muted);word-break:break-all"">$(& $url $f)</div></td>" +
                            "<td style=""padding:10px 0 10px 12px;border-top:1px solid #e2e4e7;text-align:right;white-space:nowrap""><a href=""$(& $url $f)"" style=""display:inline-block;padding:6px 12px;border-radius:4px;background:$($col.warn);color:#fff;text-decoration:none;font-size:12px;font-weight:600"">Open flow</a></td></tr>" }

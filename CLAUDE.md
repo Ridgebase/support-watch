@@ -47,5 +47,8 @@ README.md says what the system is and how it runs. This file is what to know bef
 - Stuck runs: a run still Running after 2 h (`$stuckAfterMin` in build-dashboard.ps1). The user knows the flows: none legitimately takes that long.
 - Stale clients: notify.ps1 emails once per episode when a client's snapshot is over an hour old; "already announced" checks compare with the saved state ($prev), never with the state rebuilt for the run.
 - Silent flows: recurrence flows only, 1.5x the longest gap between runs this week, measured on a weekday clock when the flow never ran on
-  a weekend. The flag lasts a week at most because the window is 7 days; a Monday holiday produces a false positive that afternoon.
+  a weekend. The weekday clock also skips the statutory holidays hand-listed in build-dashboard.ps1 (`$holidays`, through 2028: extend it).
+  The flag lasts a week at most because the window is 7 days. A weekend run (manual resubmit, schedule changed since) keeps the flow on
+  the wall clock for 7 days: that is the alert of 2026-10-17.
+- Credential expiry dates live in `EXPIRIES` in watch.yml (dates only); notify.ps1 mails at 14 days and once expired, keyed `expiry|<name>`.
 - SEMO is never collected from GitHub (`CARRY_CLIENTS`): its Conditional Access blocks US runners, so it always comes from the function's gist.

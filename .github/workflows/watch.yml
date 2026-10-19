@@ -49,6 +49,9 @@ jobs:
           ODOO_URL:     ${{ secrets.ODOO_URL }}    # Odoo Helpdesk: tickets in progress (Helpdesk tab)
           ODOO_USER:    ${{ secrets.ODOO_USER }}
           ODOO_KEY:     ${{ secrets.ODOO_KEY }}
+          # Credentials with a fixed expiry, dates only ("label=YYYY-MM-DD; label=..."): shown under the page title, mailed 14 days ahead and once expired.
+          # After renewing one, store the new secret and put the new date here. Refresh tokens roll over with use and have no date.
+          EXPIRIES:     'cron-job.org token (GitHub dispatches, fine-grained)=2027-09-30'
         run: ./scripts/collect.ps1
 
       # Azure Static Web Apps (free tier): the site requires a Microsoft sign-in and the invited "reader" role (scripts/staticwebapp.config.json).

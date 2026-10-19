@@ -24,9 +24,15 @@ $tickets = @(if (Test-Path $TicketsCsv) { @(Import-Csv $TicketsCsv) } else { @()
 $pbiRuns = @(if (Test-Path $PbiRunsCsv) { @(Import-Csv $PbiRunsCsv) } else { @() })   # one row per Power BI refresh in the window, from collect.ps1
 $pbidays = @(); $pbifails = @()
 $stuckAfterMin = 120   # a run still Running after this is stuck (the user's call: no flow legitimately takes 2 h)
-# Weekday clock for silent-flow detection: minutes since 2000-01-03 (a Monday) with Saturdays and Sundays removed; a weekend instant counts as Friday midnight.
-$bizMin = { param([datetime]$d) $dow = [int]$d.DayOfWeek; $wk = [math]::Floor(($d.Date - [datetime]'2000-01-03').TotalDays / 7)
-    $wd = if ($dow -in 0, 6) { 5 } else { $dow - 1 }; $tod = if ($dow -in 0, 6) { 0 } else { ($d - $d.Date).TotalMinutes }; ($wk * 5 + $wd) * 1440 + $tod }
+# Weekday clock for silent-flow detection: minutes since 2000-01-03 (a Monday) with Saturdays, Sundays and statutory holidays removed; an instant on
+# such a day counts as the previous business day's midnight. Holidays: the union of Quebec and federal ones, observed dates (a weekend holiday moved to the
+# Monday), hand-listed; the cost of a missing one is a false "silent" that afternoon, of an extra one a silent flow caught a day later. Extend before 2029.
+$holidays = @('2026-01-01', '2026-04-03', '2026-04-06', '2026-05-18', '2026-06-24', '2026-07-01', '2026-09-07', '2026-09-30', '2026-10-12', '2026-11-11', '2026-12-25', '2026-12-28',
+              '2027-01-01', '2027-03-26', '2027-03-29', '2027-05-24', '2027-06-24', '2027-07-01', '2027-09-06', '2027-09-30', '2027-10-11', '2027-11-11', '2027-12-27', '2027-12-28',
+              '2028-01-03', '2028-04-14', '2028-04-17', '2028-05-22', '2028-06-26', '2028-07-03', '2028-09-04', '2028-10-02', '2028-10-09', '2028-11-13', '2028-12-25', '2028-12-26') | ForEach-Object { [datetime]$_ }
+$bizMin = { param([datetime]$d) $dow = [int]$d.DayOfWeek; $wk = [math]::Floor(($d.Date - [datetime]'2000-01-03').TotalDays / 7); $off = $dow -in 0, 6 -or $d.Date -in $holidays
+    $wd = if ($dow -in 0, 6) { 5 } else { $dow - 1 }; $tod = if ($off) { 0 } else { ($d - $d.Date).TotalMinutes }   # business days before $d.Date = weeks * 5 + weekday - the holidays already passed
+    ($wk * 5 + $wd - @($holidays | Where-Object { $_ -lt $d.Date }).Count) * 1440 + $tod }
 $wallMin = { param([datetime]$d) ($d - [datetime]'2000-01-03').TotalMinutes }
 
 # Power BI week, same shape as the flows: totals per model on its row, totals per client per day for the tab's recap and the weekly mail.
@@ -52,7 +58,8 @@ foreach ($g in $rows | Group-Object Client) {
         # flow whose last run is older than 1.5x that (+15 min of collection slack) at snapshot time is Silent: it stopped running without
         # failing, which no failure count shows. The longest gap, not the median, so a business-hours schedule is not silent every night.
         # A flow with no weekend run in the window is measured on the weekday clock (Saturdays and Sundays do not exist), so a weekday
-        # schedule is not silent on Sunday, and one that stopped on Friday is caught on Monday afternoon. Statutory holidays are not known: a flow idle on a holiday Monday is flagged that afternoon.
+        # schedule is not silent on Sunday or on a statutory holiday ($holidays), and one that stopped on Friday is caught on Monday afternoon. A run on a weekend
+        # (a manual resubmit, a schedule changed since) keeps the flow on the wall clock until it leaves the 7-day window.
         # ponytail: a flow that stopped more than 7 days ago has no runs left in the window and no gap, so the flag lasts a week at most; keep gaps in state/ if that matters.
         $starts = @($runs | ForEach-Object { [datetime]$_.Start } | Sort-Object); $gap = 0.0; $silent = $false   # 0.0: an [int] seed would make [math]::Max pick the integer overload and truncate
         if ($f.Trigger -like 'Recurrence*' -and $starts.Count -ge 3) {
@@ -89,7 +96,9 @@ if (Test-Path $Carry) {
     $flows += @($c.flows); $days += @($c.days); $fails += @($c.fails); $powerbi += @($c.powerbi); $pbidays += @($c.pbidays); if ($c.pbifails) { $pbifails += @($c.pbifails) }; $apps += @($c.apps); $conns += @($c.connections)
 }
 
-$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi; pbidays = $pbidays; pbifails = $pbifails; apps = $apps; connections = $conns; tickets = $tickets; helpdesk = $HelpdeskAt } | ConvertTo-Json -Depth 5 -Compress
+# Credentials with a fixed expiry, from EXPIRIES ("label=YYYY-MM-DD; label=YYYY-MM-DD", plain env in watch.yml, dates only, never the secrets): shown on the page, mailed by notify.ps1.
+$expiries = @(foreach ($e in "$env:EXPIRIES" -split ';') { if ($e -match '^\s*(.+?)\s*=\s*(\d{4}-\d{2}-\d{2})\s*$') { [pscustomobject]@{ Name = $Matches[1]; Date = $Matches[2] } } })
+$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi; pbidays = $pbidays; pbifails = $pbifails; apps = $apps; connections = $conns; tickets = $tickets; helpdesk = $HelpdeskAt; expiries = $expiries } | ConvertTo-Json -Depth 5 -Compress
 $data = $data.Replace('</', '<\/')   # a "</script>" inside any text (a connection error, a flow name) would end the page's data script; "<\/" is the same string in JSON
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $html = (Get-Content "$PSScriptRoot/dashboard.template.html" -Raw -Encoding UTF8).Replace('__DATA__', $data)

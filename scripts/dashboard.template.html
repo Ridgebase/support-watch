@@ -137,6 +137,9 @@ const hm = iso => iso.slice(0, 10) === localDate(new Date()) ? iso.slice(11, 16)
 document.getElementById('meta').innerHTML = snaps.length
   ? 'Last update: ' + snaps.map(([c, t]) => `${esc(c)} <b>${hm(t)}</b>` + (Date.now() - new Date(t) > STALE_MS ? ' <b class="c-bad">STALE</b>' : '')).join(' · ')
   : 'No data yet. Run flow-runs.ps1 first.';
+// Credentials with a fixed expiry (EXPIRIES in watch.yml, dates only): red under 14 days, so the Monday glance catches a renewal before the page goes stale.
+const expLine = (data.expiries || []).map(e => { const d = Math.ceil((new Date(e.Date + 'T00:00') - Date.now()) / 864e5); return `${esc(e.Name)} <b class="${d < 14 ? 'c-bad' : ''}">${e.Date}</b>` + (d < 14 ? ` (${d < 0 ? 'expired' : d + ' d'})` : ''); });
+if (expLine.length) document.getElementById('meta').innerHTML += '<br>Expires: ' + expLine.join(' · ');
 
 function health(client) {
   const fl = summary.filter(f => !client || f.client === client);

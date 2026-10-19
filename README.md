@@ -27,9 +27,11 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   error text: the failed action's name, code and connector message for a flow's 30 newest failed runs, read with two extra calls
   each, the run's generic banner for older ones; ~40 KB instead of every run) and renders `out/site/index.html` from `dashboard.template.html`. It also flags
   **silent** flows: an enabled recurrence flow whose last run is older than 1.5x the longest gap between two of its runs this week
-  (3 runs needed), i.e. a schedule that stopped without failing. A flow with no weekend run is measured in weekday time, so a
-  weekday schedule is not silent over the weekend. Yellow on the page, counted in "needing attention", emailed once. Same for
-  **stuck** runs: a run still Running after 2 hours.
+  (3 runs needed), i.e. a schedule that stopped without failing. A flow with no weekend run is measured in weekday time (Saturdays,
+  Sundays and the statutory holidays listed in `build-dashboard.ps1` do not count), so a weekday schedule is not silent over the weekend.
+  Yellow on the page, counted in "needing attention", emailed once. Same for **stuck** runs: a run still Running after 2 hours.
+- Credentials with a fixed expiry are listed, dates only, in `EXPIRIES` (plain env in `watch.yml`): shown under the page title, red and
+  emailed when under 14 days, emailed again once expired. After renewing one, store the new secret and put the new date there.
 - The same run also collects, per client, the refresh history of the Power BI models listed under `PowerBI` in `CLIENTS_JSON`
   (`out/powerbi.csv` = last refresh per model, `out/powerbi-runs.csv` = every refresh of the window, aggregated per day into
   `pbidays` for the Power BI tab's recap and the weekly mail) and, for every listed environment, the canvas apps and connections
