@@ -46,11 +46,12 @@ $flowRow = { param($f) "<tr><td style=""padding:10px 0;border-top:1px solid #e2e
                          "<div style=""margin-top:6px;font:11px/1.4 Consolas,Menlo,monospace;color:$($col.muted);word-break:break-all"">$(& $runUrl $f)</div></td>" +
                          "<td style=""padding:10px 0 10px 12px;border-top:1px solid #e2e4e7;text-align:right;white-space:nowrap""><a href=""$(& $runUrl $f)"" style=""display:inline-block;padding:6px 12px;border-radius:4px;background:$($col.bad);color:#fff;text-decoration:none;font-size:12px;font-weight:600"">$(if ($f.LastFailedRun) { 'Open failed run' } else { 'Open flow' })</a></td></tr>" }
 $card = { param($title, $body) "<div style=""background:#fff;border:1px solid $($col.line);border-radius:6px;padding:14px 16px;margin:0 0 12px""><div style=""font:400 19px/1.2 'Palatino Linotype',Palatino,Georgia,serif;color:#043f45;margin-bottom:8px"">$title</div>$body</div>" }
-$wrap = { param($kicker, $title, $inner)
+$wrap = { param($kicker, $title, $inner, $client)   # $client: the per-client recap, which may be forwarded to the client: no dashboard link
+    $foot = if ($client) { $kicker } else { "$kicker &middot; <a href=""$page"" style=""color:$($col.muted)"">Open the dashboard</a>" }
     "<!doctype html><html><body style=""margin:0;padding:24px 16px;background:$($col.bg);color:$($col.fg);font:14px/1.5 'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif"">" +
     "<div style=""max-width:600px;margin:0 auto""><div style=""color:$($col.bad);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.12em"">Ridgebase &middot; Support Monitoring System</div>" +
     "<h1 style=""font:400 26px/1.15 'Palatino Linotype',Palatino,Georgia,serif;letter-spacing:-.01em;margin:2px 0 16px"">$title</h1>$inner" +
-    "<div style=""color:$($col.muted);font-size:12px;margin-top:16px"">$kicker &middot; <a href=""$page"" style=""color:$($col.muted)"">Open the dashboard</a></div></div></body></html>" }
+    "<div style=""color:$($col.muted);font-size:12px;margin-top:16px"">$foot</div></div></body></html>" }
 
 # --- real-time: failed runs not announced yet ------------------------------------------------------------------
 $failing = @($d.flows | Where-Object { $_.LastStatus -eq 'Failed' -and "$($_.Enabled)".ToLower() -ne 'false' })   # failing right now (recap pills)
@@ -194,7 +195,7 @@ if (($now.DayOfWeek -eq 'Monday' -and $now.Hour -ge 7 -and $digest -ne $today -a
                $(if ($pb) { & $card "Power BI $(if ($pbf) { & $pill (& $cnt $pbf.Count 'refresh failure') $col.bad $col.badbg } else { & $pill 'No failure' $col.ok $col.okbg })" "<div style=""color:$($col.muted);font-size:12px"">Last 7 days</div><div>$($pb.Count) models &middot; <b>$pbRuns</b> refreshes &middot; <b style=""color:$(if ($pbFail) { $col.bad } else { $col.ok })"">$pbFail</b> failed &middot; $pbRate success</div>$(if ($pbf) { & $tbl ($pbf | ForEach-Object { & $cPbiRow $_ }) })" }) +
                (& $card "Helpdesk $(if ($late) { & $pill ((& $cnt $late.Count 'ticket') + ' past SLA') $col.bad $col.badbg } elseif ($tk) { & $pill ((& $cnt $tk.Count 'ticket') + ' in progress') $col.warn $col.warnbg } else { & $pill 'No ticket in progress' $col.ok $col.okbg })" $(if ($tk) { & $tbl ($tk | Sort-Object Created | ForEach-Object { & $tkRow $_ }) } else { '<div>No ticket in progress.</div>' }))
         $mails += @{ subject = "$(if ($SampleDigest) { '[Sample] ' })[Support Watch] $c week $from to ${to}: $(& $cnt $hit.Count 'flow') with failures, $(& $cnt $pbf.Count 'refresh failure'), $(& $cnt $tk.Count 'ticket') in progress"
-                     body    = & $wrap "Recap of $from to $to for $c, sent every Monday morning" "${c}: week in review" $own }
+                     body    = & $wrap "Recap of $from to $to for $c, sent every Monday morning" "${c}: week in review" $own $true }
     }
     $other = @($d.tickets | Where-Object { -not $_.Client })
     if ($other) { $cards = @($cards) + (& $card 'Helpdesk, other customers' (($other | Group-Object Customer | Sort-Object Name | ForEach-Object { $late = & $lateOf $_.Group; "<div style=""margin-top:6px""><b>$(& $esc $_.Name)</b>: $($_.Count) in progress &middot; <b style=""color:$(if ($late) { $col.bad } else { $col.ok })"">$($late.Count)</b> past SLA$(& $names 'Past SLA' (& $tkNames $late) 'Name')</div>" }) -join '')) }
