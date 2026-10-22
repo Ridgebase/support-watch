@@ -41,7 +41,8 @@ foreach ($m in $powerbi) {
     $m | Add-Member -NotePropertyName Refreshes -NotePropertyValue $mr.Count -Force
     $m | Add-Member -NotePropertyName Failed -NotePropertyValue @($mr | Where-Object Status -eq 'Failed').Count -Force
 }
-$pbifails = @($pbiRuns | Where-Object Status -eq 'Failed' | Sort-Object Start -Descending | Select-Object -First 100 Client, Workspace, Model, ModelId, Start, End, Type)   # the Power BI tab's "Failed refreshes" section
+$pbifails = @($pbiRuns | Where-Object Status -eq 'Failed' | Sort-Object Start -Descending | Select-Object -First 100 Client, Workspace, Model, ModelId, Start, End, Type,   # the Power BI tab's "Failed refreshes" section
+    @{ n = 'Recovered'; e = { $f = $_; "$(($pbiRuns | Where-Object { $_.ModelId -eq $f.ModelId -and $_.Status -eq 'Completed' -and $_.Start -gt $f.Start } | Sort-Object Start | Select-Object -First 1).Start)" } })   # first completed refresh after it: "working again since" in the client's recap
 foreach ($g in $pbiRuns | Group-Object Client) {
     foreach ($dg in $g.Group | Group-Object { $_.Start.Substring(0, 10) }) {
         $pbidays += [pscustomobject]@{ Client = $g.Name; Day = $dg.Name; Refreshes = $dg.Count
