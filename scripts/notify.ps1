@@ -1,7 +1,8 @@
 ﻿# Emails support@ about flows with a NEW failed run: one email per job run listing the flows whose most recent failed run
 # is newer than the one last announced (so a run that fails and recovers inside the 10-minute window is still reported, and
 # a flow that keeps failing every few minutes is reported once per job run at most), plus one weekly recap on Monday after
-# 07:00 Eastern that doubles as the dead-man's switch: no recap on Monday morning means the job itself is broken.
+# 07:00 Eastern that doubles as the dead-man's switch: no recap on Monday morning means the job itself is broken, plus one recap
+# per client the same morning (its flows with failures, its failed Power BI refreshes and its tickets in progress, in full).
 # State lives in alerts.json (committed by the workflow): { open: { "Client|FlowId": "<start of the last announced failed run>" }, digest: "YYYY-MM-DD" }.
 # Runs on Windows PowerShell 5.1 and PowerShell 7.
 # Mail goes out over SMTP (Ridgebase's mail is Google Workspace, so Microsoft Graph has no support@ mailbox to send as,
@@ -150,6 +151,15 @@ if (($now.DayOfWeek -eq 'Monday' -and $now.Hour -ge 7 -and $digest -ne $today -a
     $nowIso  = $now.ToString('s')   # deadlines in data.json are Eastern ISO strings, compared as strings like $weekAgo; foreach (not a pipeline): an empty list must stay empty, $null piped would run once
     $lateOf  = { param($t) @(foreach ($x in $t) { if ($x.Deadline -and (& $iso $x.Deadline) -lt $nowIso) { $x } }) }
     $tkNames = { param($t) @(foreach ($x in $t) { [pscustomobject]@{ Name = "#$($x.Ref) $($x.Ticket)" } }) }
+    # Per-client recap (one more mail per client, same morning, same recipients): the week's flows with failures, every failed refresh and every ticket in progress, in full.
+    $pbUrl  = @{}; foreach ($m in @($d.powerbi)) { $pbUrl["$($m.ModelId)"] = $m.Url }   # pbifails rows carry no Url: taken from the model's row
+    $tbl    = { param($rows) "<table style=""width:100%;border-collapse:collapse"">$($rows -join '')</table>" }
+    $cnt    = { param($k, $w) "$k $w$(if ($k -ne 1) { 's' })" }
+    $tkRow  = { param($t) $lateT = $t.Deadline -and (& $iso $t.Deadline) -lt $nowIso
+                $sla = if ($t.Deadline) { " &middot; <span style=""color:$(if ($lateT) { $col.bad } else { $col.fg })"">SLA $(& $fmt $t.Deadline)$(if ($lateT) { ' (past)' })</span>" } else { '' }
+                "<tr><td style=""padding:10px 0;border-top:1px solid #e2e4e7""><b>#$(& $esc $t.Ref) $(& $esc $t.Ticket)</b><br><span style=""color:$($col.muted);font-size:12px"">$(& $esc $t.Priority) priority &middot; $(if ($t.Assignee) { "assigned to $(& $esc $t.Assignee)" } else { 'unassigned' }) &middot; opened $(& $fmt $t.Created) &middot; updated $(& $fmt $t.Updated)$sla</span>" +
+                "<div style=""margin-top:6px;font:11px/1.4 Consolas,Menlo,monospace;color:$($col.muted);word-break:break-all"">$($t.Url)</div></td>" +
+                "<td style=""padding:10px 0 10px 12px;border-top:1px solid #e2e4e7;text-align:right;white-space:nowrap""><a href=""$($t.Url)"" style=""display:inline-block;padding:6px 12px;border-radius:4px;background:#043f45;color:#fff;text-decoration:none;font-size:12px;font-weight:600"">Open ticket</a></td></tr>" }
     $cards = foreach ($c in $clients) {
         $days = @($d.days | Where-Object Client -eq $c)   # data.json already holds exactly the last 7 days
         $runs = ($days | Measure-Object Runs -Sum).Sum; $bad = ($days | Measure-Object Failed -Sum).Sum; $ok = ($days | Measure-Object Succeeded -Sum).Sum; $can = ($days | Measure-Object Cancelled -Sum).Sum
@@ -174,6 +184,13 @@ if (($now.DayOfWeek -eq 'Monday' -and $now.Hour -ge 7 -and $digest -ne $today -a
         $tk = @($d.tickets | Where-Object Client -eq $c); $late = & $lateOf $tk
         $hdLine = if ($tk) { "<div style=""color:$($col.muted);font-size:12px;margin-top:10px"">Helpdesk</div><div><b>$($tk.Count)</b> tickets in progress &middot; <b style=""color:$(if ($late) { $col.bad } else { $col.ok })"">$($late.Count)</b> past SLA$(& $names 'Past SLA' (& $tkNames $late) 'Name')</div>" } else { '' }
         & $card "$c $pills" "<div style=""color:$($col.muted);font-size:12px"">Last 7 days</div><div>$week</div>$pbLine$paLine$hdLine$rows"
+        # The client's own mail: every refresh failure of the week (pbifails, newest first), not only the models still failing.
+        $pbf = @($d.pbifails | Where-Object Client -eq $c | ForEach-Object { [pscustomobject]@{ Model = $_.Model; Workspace = $_.Workspace; Start = $_.Start; Type = $_.Type; Url = $pbUrl["$($_.ModelId)"] } })
+        $own = (& $card "Flows $(if ($hit) { & $pill ((& $cnt $hit.Count 'flow') + ' with failures') $col.bad $col.badbg } else { & $pill 'No failure' $col.ok $col.okbg })" "<div style=""color:$($col.muted);font-size:12px"">Last 7 days</div><div>$week</div>$(if ($hit) { & $tbl ($hit | ForEach-Object { & $flowRow $_ }) })") +
+               $(if ($pb) { & $card "Power BI $(if ($pbf) { & $pill (& $cnt $pbf.Count 'refresh failure') $col.bad $col.badbg } else { & $pill 'No failure' $col.ok $col.okbg })" "<div style=""color:$($col.muted);font-size:12px"">Last 7 days</div><div>$($pb.Count) models &middot; <b>$pbRuns</b> refreshes &middot; <b style=""color:$(if ($pbFail) { $col.bad } else { $col.ok })"">$pbFail</b> failed &middot; $pbRate success</div>$(if ($pbf) { & $tbl ($pbf | ForEach-Object { & $pbiRow $_ }) })" }) +
+               (& $card "Helpdesk $(if ($late) { & $pill ((& $cnt $late.Count 'ticket') + ' past SLA') $col.bad $col.badbg } elseif ($tk) { & $pill ((& $cnt $tk.Count 'ticket') + ' in progress') $col.warn $col.warnbg } else { & $pill 'No ticket in progress' $col.ok $col.okbg })" $(if ($tk) { & $tbl ($tk | Sort-Object Created | ForEach-Object { & $tkRow $_ }) } else { '<div>No ticket in progress.</div>' }))
+        $mails += @{ subject = "$(if ($SampleDigest) { '[Sample] ' })[Support Watch] $c week $from to ${to}: $(& $cnt $hit.Count 'flow') with failures, $(& $cnt $pbf.Count 'refresh failure'), $(& $cnt $tk.Count 'ticket') in progress"
+                     body    = & $wrap "Recap of $from to $to for $c, sent every Monday morning" "${c}: week in review" $own }
     }
     $other = @($d.tickets | Where-Object { -not $_.Client })
     if ($other) { $cards = @($cards) + (& $card 'Helpdesk, other customers' (($other | Group-Object Customer | Sort-Object Name | ForEach-Object { $late = & $lateOf $_.Group; "<div style=""margin-top:6px""><b>$(& $esc $_.Name)</b>: $($_.Count) in progress &middot; <b style=""color:$(if ($late) { $col.bad } else { $col.ok })"">$($late.Count)</b> past SLA$(& $names 'Past SLA' (& $tkNames $late) 'Name')</div>" }) -join '')) }
