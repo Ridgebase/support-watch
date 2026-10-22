@@ -54,6 +54,7 @@ foreach ($g in $rows | Group-Object Client) {
     foreach ($fg in $g.Group | Group-Object Environment, FlowId, Flow) {
         $f = $fg.Group[0]; $runs = @($fg.Group | Where-Object $isRun); $last = $runs | Sort-Object Start -Descending | Select-Object -First 1
         $lf = $runs | Where-Object Status -eq 'Failed' | Sort-Object Start -Descending | Select-Object -First 1   # the latest failed run: notify.ps1 alerts when it is newer than the one it last announced
+        $rec = if ($lf) { $runs | Where-Object { $_.Status -eq 'Succeeded' -and $_.Start -gt $lf.Start } | Sort-Object Start | Select-Object -First 1 }   # first success after it: "working again since" in the client's recap
         # Silent flows: Gap = the longest interval between two runs of a recurrence flow this week, in minutes (3 runs needed). An enabled
         # flow whose last run is older than 1.5x that (+15 min of collection slack) at snapshot time is Silent: it stopped running without
         # failing, which no failure count shows. The longest gap, not the median, so a business-hours schedule is not silent every night.
@@ -74,7 +75,7 @@ foreach ($g in $rows | Group-Object Client) {
             Client = $g.Name; Environment = $f.Environment; EnvironmentId = $f.EnvironmentId; Flow = $f.Flow; FlowId = $f.FlowId; Enabled = $f.Enabled; Trigger = $f.Trigger
             Runs = $runs.Count; Failed = @($runs | Where-Object Status -eq 'Failed').Count
             Last = $(if ($last) { $last.Start } else { '' }); LastStatus = $(if ($last) { $last.Status } else { $f.Status })
-            LastFailed = "$($lf.Start)"; LastFailedRun = "$($lf.RunId)"; LastError = "$($lf.Error)"   # '' when none ($null would serialize as {} in 5.1)
+            LastFailed = "$($lf.Start)"; LastFailedRun = "$($lf.RunId)"; LastError = "$($lf.Error)"; Recovered = "$($rec.Start)"   # '' when none ($null would serialize as {} in 5.1)
             Gap = $gap; Silent = [bool]$silent
             Stuck = $hung.Count; StuckSince = "$(if ($hung) { $hung[0].Start })"; StuckRun = "$(if ($hung) { $hung[0].RunId })"   # oldest stuck run
         }
