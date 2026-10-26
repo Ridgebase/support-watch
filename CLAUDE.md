@@ -52,3 +52,6 @@ README.md says what the system is and how it runs. This file is what to know bef
   the wall clock for 7 days: that is the alert of 2026-10-17.
 - Credential expiry dates live in `EXPIRIES` in watch.yml (dates only); notify.ps1 mails at 14 days and once expired, keyed `expiry|<name>`.
 - SEMO is never collected from GitHub (`CARRY_CLIENTS`): its Conditional Access blocks US runners, so it always comes from the function's gist.
+- Tech watch: the Message Center needs a second token per client (`MC_<NAME>`, Microsoft Graph PowerShell app) because the Azure CLI app the
+  Flow token comes from can never be granted `ServiceMessage.Read.All` (tested 2026-10-26: AADSTS65002). The blog feeds are read once a day
+  into `state/news.csv` (`ReadAt` column), committed by the bot; delete the file to force a read.

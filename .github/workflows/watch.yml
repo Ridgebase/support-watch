@@ -44,6 +44,7 @@ jobs:
         env:
           CLIENTS_JSON: ${{ secrets.CLIENTS_JSON }}
           RT_TSMO:      ${{ secrets.RT_TSMO }}
+          MC_TSMO:      ${{ secrets.MC_TSMO }}   # Message Center token (get-refresh-token.ps1 -MessageCenter): Tech watch tab, service changes
           CARRY_URL:    ${{ secrets.CARRY_URL }}
           CARRY_CLIENTS: SEMO   # collected by the Azure function only (azure-function/), never from here
           ODOO_URL:     ${{ secrets.ODOO_URL }}    # Odoo Helpdesk: tickets in progress (Helpdesk tab)
@@ -52,8 +53,8 @@ jobs:
           # Credentials with a fixed expiry, dates only ("label=YYYY-MM-DD; label=..."): shown under the page title, mailed 14 days ahead and once expired.
           # After renewing one, store the new secret and put the new date here. Refresh tokens roll over with use and have no date.
           EXPIRIES:     'cron-job.org token (GitHub dispatches, fine-grained)=2027-09-30'
-          # Tech watch tab: public RSS/Atom feeds, one per line "Label | URL | optional regex on the item's title and categories". General
-          # (not per client). The M365 roadmap lists every Microsoft product, so its regex keeps the ones we support; blogs are taken whole.
+          # Tech watch tab, bottom section: public RSS/Atom feeds, one per line "Label | URL | optional regex on the item's title and categories",
+          # read once a day. General (not per client). The M365 roadmap lists every Microsoft product, so its regex keeps the ones we support; blogs are taken whole.
           WATCH_FEEDS: |
             Power Automate blog | https://www.microsoft.com/en-us/power-platform/blog/power-automate/feed/
             Power Apps blog | https://www.microsoft.com/en-us/power-platform/blog/power-apps/feed/
@@ -97,7 +98,7 @@ jobs:
         run: |
           today=$(date -u +%F)
           [ "$(cat state/last-run.txt 2>/dev/null)" = "$today" ] || echo "$today" > state/last-run.txt
-          git add state/last-run.txt state/alerts.json
+          git add state/last-run.txt state/alerts.json state/news.csv
           if ! git diff --cached --quiet; then
             git config user.name  "support-watch bot"
             git config user.email "support-watch@users.noreply.github.com"

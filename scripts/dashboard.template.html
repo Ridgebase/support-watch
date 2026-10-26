@@ -292,15 +292,32 @@ function render() {
     return;
   }
 
-  // Tech watch: general Microsoft product news (WATCH_FEEDS in watch.yml), newest first, whatever client or switch is selected (neither
-  // applies). An item under a week old has a bold date, so the Monday glance sees what is new since the last one.
+  // Tech watch. Top: service changes from each client's Microsoft 365 Message Center (retirements, licensing and policy changes, with the services
+  // affected and an action date), one row per message with the clients it was seen in (the same MC id shows in every tenant). Red: action required
+  // within 14 days or overdue; yellow: a major change or a retirement. The tab's badge counts the red ones. "Problems only" keeps the rows with an
+  // action date. Bottom: blog posts and roadmap items (WATCH_FEEDS, read once a day), newest first, a bold date when under a week old.
+  const byId = {}; for (const c of (data.changes || []).filter(c => !client || c.Client === client)) { (byId[c.Id] ??= { ...c, clients: [] }).clients.push(c.Client); }
+  const daysTo = c => Math.ceil((new Date(c.ActionBy) - Date.now()) / 864e5);
+  const chCls = c => c.ActionBy && daysTo(c) < 14 ? 'bad' : String(c.Major) === 'True' || /Retirement/.test(c.Tags) ? 'warn' : '';
+  const chBad = Object.values(byId).filter(c => chCls(c) === 'bad').length;
+  document.querySelector('.tabs [data-tab="news"]').innerHTML = 'Tech watch' + (chBad ? `<span class="badge">${chBad}</span>` : '');
   if (tab === 'news') {
-    const items = (data.news || []).slice().sort((a, b) => b.Date.localeCompare(a.Date));
-    const sources = [...new Set((data.news || []).map(n => n.Source))].sort();
-    if (!data.newsAt) h += '<p class="muted">Tech watch not collected in the last update (WATCH_FEEDS unset or every feed failed; see the job log).</p>';
-    else if (!items.length) h += '<p class="muted">Nothing to show.</p>';
+    const CAT = { planForChange: 'Plan for change', preventOrFixIssues: 'Prevent or fix issues', stayInformed: 'Stay informed' };
+    const ch = Object.values(byId).filter(c => !only || c.ActionBy).sort((a, b) => (a.ActionBy || '9').localeCompare(b.ActionBy || '9') || b.Modified.localeCompare(a.Modified));
+    h += `<h2 id="changes">Service changes <span class="muted">(${ch.length}, Message Center, last 60 days)</span></h2>`;
+    if (!(data.changes || []).length) h += '<p class="muted">No Message Center read in the last update: a client needs its MC_&lt;NAME&gt; token (see README).</p>';
+    else if (!ch.length) h += '<p class="muted">Nothing to show.</p>';
     else {
-      h += `<h2 id="news">Tech watch <span class="muted">(${items.length} items, last 45 days, from ${sources.map(esc).join(', ')})</span></h2><div class="card wrap"><table><thead><tr><th>Date</th><th>Source</th><th>What's new</th></tr></thead><tbody>`;
+      h += '<div class="card wrap" style="margin-bottom:20px"><table><thead><tr><th>Action by</th><th>Client</th><th>Change</th><th>Updated</th></tr></thead><tbody>';
+      for (const c of ch) h += `<tr class="${chCls(c)}"><td class="date ${chCls(c) === 'bad' ? 'c-bad' : ''}">${c.ActionBy ? c.ActionBy.slice(0, 10) + (daysTo(c) < 0 ? ' <b>overdue</b>' : ` (${daysTo(c)} d)`) : '—'}</td><td>${c.clients.sort().map(esc).join(', ')}</td><td class="news"><b>${esc(c.Title)}</b>${copyBtn(c.Url)}<small>${esc(c.Summary)} <i>${[CAT[c.Category] || c.Category, c.Services, c.Tags].filter(Boolean).map(esc).join(' · ')}</i></small></td><td class="date">${c.Modified.slice(0, 10)}</td></tr>`;
+      h += '</tbody></table></div>';
+    }
+    const items = (data.news || []).slice().sort((a, b) => b.Date.localeCompare(a.Date));
+    const sources = [...new Set(items.map(n => n.Source))].sort();
+    h += `<h2 id="blogs">Blog posts and roadmap <span class="muted">(${items.length}, last 45 days${data.newsAt ? ', read ' + hm(data.newsAt) : ''})</span></h2>`;
+    if (!items.length) h += '<p class="muted">No feed read yet (WATCH_FEEDS in watch.yml; see the job log).</p>';
+    else {
+      h += `<p class="muted">From ${sources.map(esc).join(', ')}.</p><div class="card wrap"><table><thead><tr><th>Date</th><th>Source</th><th>What's new</th></tr></thead><tbody>`;
       for (const n of items) h += `<tr><td class="date ${Date.now() - new Date(n.Date) < 7 * 864e5 ? '' : 'muted'}" style="${Date.now() - new Date(n.Date) < 7 * 864e5 ? 'font-weight:600' : ''}">${n.Date.slice(0, 10)}</td><td>${esc(n.Source)}</td><td class="news"><a href="${esc(n.Url)}" target="_blank" rel="noopener">${esc(n.Title)}</a><small>${esc(n.Summary)}${n.Tags ? ' <i>' + esc(n.Tags) + '</i>' : ''}</small></td></tr>`;
       h += '</tbody></table></div>';
     }

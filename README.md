@@ -43,10 +43,16 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   (`out/tickets.csv`, Helpdesk tab: a ticket past its SLA deadline is red and counted in the tab's badge). A ticket belongs to the client
   whose optional `"Odoo"` field in `CLIENTS_JSON` equals the ticket customer's company, or whose tenant's first label is contained in that
   company name (`seguinmorris.com` ~ `Séguin Morris Inc`); the others show under All clients only.
-- The cloud job also reads the public Microsoft feeds listed in `WATCH_FEEDS` (plain env in `watch.yml`, one per line `Label | URL | optional
-  regex` matched against each item's title and categories, used to keep only our products from the Microsoft 365 roadmap) into `out/news.csv`:
-  the **Tech watch** tab, a general technology watch (not per client), newest 25 items per feed from the last 45 days, with links to the
-  Microsoft pages. A feed that fails is a warning in the job log; the tab shows the others.
+- The **Tech watch** tab has two sections. Top, **service changes**: each client's Microsoft 365 Message Center (Graph, the place Microsoft
+  announces retirements, licensing and policy changes with the services affected and an action date), messages of the last 60 days that are
+  more than "Stay informed", one row per message with the clients it was seen in; red with the tab's badge when an action is due within 14 days
+  or overdue, yellow for a major change or a retirement. It needs a second token per client, `MC_<NAME>`, made by
+  `get-refresh-token.ps1 -Tenant <tenant> -Out <file> -MessageCenter` (the Flow token's app is not pre-authorized for that permission; the
+  account needs a role that reads the Message Center, e.g. Global Reader or Message Center Reader) and stored like `RT_<NAME>` (GitHub secret;
+  for SEMO the function's app setting, `flow-runs.ps1 -Login SEMO -MessageCenter` then `azure-function/set-secrets.ps1`). Bottom, **blog posts
+  and roadmap**: the public feeds listed in `WATCH_FEEDS` (plain env in `watch.yml`, one per line `Label | URL | optional regex` matched against
+  each item's title and categories, used to keep only our products from the Microsoft 365 roadmap), general (not per client), newest 25 items
+  per feed from the last 45 days, read once a day into `state/news.csv` (committed with the rest of `state/`), with links to the Microsoft pages.
 - `.github/workflows/watch.yml` runs both every 10 minutes. GitHub throttles its own `schedule` trigger (gaps of ~30 min
   were observed), so the 10-minute cadence comes from a free cron-job.org job that POSTs to the workflow's
   `dispatches` API with a fine-grained token (repo `support-watch`, permission Actions read/write, approved by an

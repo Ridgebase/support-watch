@@ -12,6 +12,8 @@
 #                  connections.csv (same refresh token exchanged for a Power Apps API token, Graph for the owners' account state)
 #   ODOO_URL, ODOO_USER, ODOO_KEY  optional: the Odoo Helpdesk tickets in progress go to tickets.csv (see the Helpdesk block)
 #   WATCH_FEEDS    optional: public RSS/Atom feeds for the Tech watch tab, one per line "Label | URL | optional regex" (see the Tech watch block)
+#   MC_<NAME>      optional per client: a second refresh token (get-refresh-token.ps1 -MessageCenter) that reads the client's Microsoft 365
+#                  Message Center into changes.csv: the service changes section of the Tech watch tab
 #   RT_<NAME>      the client's refresh token (from get-refresh-token.ps1), e.g. RT_SEMO
 #   NETLIFY_TOKEN  used by build-dashboard.ps1
 param([int]$Days = 7, [int]$Parallel = 8)
@@ -273,16 +275,51 @@ if ($env:ODOO_URL -and $env:ODOO_KEY) {
     } catch { $failures += "Helpdesk collection failed: $(& $why $_.Exception)" }
 }
 
-# Tech watch: a general (not per client) feed of Microsoft product news for the page's Tech watch tab. WATCH_FEEDS (plain env in watch.yml,
+# Tech watch, part 1: service changes. Each client's Microsoft 365 Message Center (Graph serviceAnnouncement/messages) is the one place Microsoft
+# announces retirements, licensing and policy changes, with the services affected and an action date. The Flow refresh token cannot read it (the
+# Azure CLI app is not pre-authorized for ServiceMessage.Read.All), hence MC_<NAME>, a second token made by get-refresh-token.ps1 -MessageCenter
+# with the Microsoft Graph PowerShell app; the signed-in account needs a role that reads the Message Center. Kept: messages changed in the last
+# 60 days that are more than "Stay informed" (a plan for change, a fix to apply, a major change, a retirement, an action date). One row per
+# client and message; the page merges the clients that share a message id. SEMO's rows come through the function and the carry-over like the rest.
+$text = { param($s) if ($s -is [System.Xml.XmlNode]) { $s = $s.InnerText }   # a CDATA or typed element (blog descriptions, Atom titles) comes as a node, not a string
+    [System.Net.WebUtility]::HtmlDecode(([regex]::Replace("$s", '<[^>]+>', ' ') -replace '\s+', ' ')).Trim() }   # HTML -> one line of plain text
+$local = { param($v) if (-not $v) { '' } else { $d = if ($v -is [datetime]) { $v.ToUniversalTime() } else { [datetime]::Parse("$v", [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
+    [TimeZoneInfo]::ConvertTimeFromUtc($d, $tz).ToString('s') } }   # Invoke-RestMethod on PowerShell 7 already turns ISO dates into [datetime]; $toLocal expects strings
+$changes = [System.Collections.Generic.List[object]]::new()
+foreach ($c in $clients) {
+    $mrt = [Environment]::GetEnvironmentVariable("MC_$($c.Name)")
+    if (-not $mrt -or $c.Name -in @($env:CARRY_CLIENTS -split ',' | ForEach-Object Trim)) { continue }
+    try {
+        $gt = (Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$($c.Tenant)/oauth2/v2.0/token" -Body @{ grant_type = 'refresh_token'; client_id = '14d82eec-204b-4c2f-b7e8-296a70dab67e'; refresh_token = $mrt; scope = 'https://graph.microsoft.com/ServiceMessage.Read.All offline_access' }).access_token
+        $url = "https://graph.microsoft.com/v1.0/admin/serviceAnnouncement/messages?`$filter=lastModifiedDateTime ge $([datetime]::UtcNow.AddDays(-60).ToString('yyyy-MM-ddTHH:mm:ssZ'))"; $n = 0
+        while ($url) {
+            $r = Invoke-RestMethod -Uri $url -Headers @{ Authorization = "Bearer $gt" } -TimeoutSec 60
+            foreach ($m in $r.value) {
+                $act = "$(& $local $m.actionRequiredByDateTime)"
+                if ($m.category -eq 'stayInformed' -and -not $m.isMajorChange -and -not $act -and @($m.tags) -notcontains 'Retirement') { continue }
+                $sum = & $text $m.body.content; if ($sum.Length -gt 300) { $sum = $sum.Substring(0, 297) + '...' }
+                $changes.Add([pscustomobject]@{ Client = $c.Name; Id = "$($m.id)"; Title = "$($m.title)"; Category = "$($m.category)"; Severity = "$($m.severity)"; Major = [bool]$m.isMajorChange
+                    Tags = (@($m.tags) -join ', '); Services = (@($m.services) -join ', '); Start = (& $local $m.startDateTime); ActionBy = $act; Modified = (& $local $m.lastModifiedDateTime)
+                    Summary = $sum; Url = "https://admin.microsoft.com/#/MessageCenter/:/messages/$($m.id)" }); $n++
+            }
+            $url = $r.'@odata.nextLink'
+        }
+        Write-Host "$($c.Name): $n service change(s) from the Message Center"
+    } catch { $failures += "$($c.Name): Message Center failed: $(& $why $_.Exception)" }
+}
+
+# Tech watch, part 2: a general (not per client) feed of Microsoft product news, the tab's bottom section. WATCH_FEEDS (plain env in watch.yml,
 # cloud job only: the SEMO function has no such setting) lists public RSS 2.0 or Atom feeds, one per line, "Label | URL | optional regex":
 # an item is kept when its title or categories match the regex (the M365 roadmap feed lists every product, the regex keeps ours).
 # Newest 25 items per feed from the last 45 days, summaries cut at 300 characters, so the page grows by a few tens of KB at most.
-# A feed that fails is a warning: the others still show, and the tab says when the feeds were last read.
-$news = [System.Collections.Generic.List[object]]::new(); $newsAt = ''
-if ($env:WATCH_FEEDS) {
+# Blogs change daily at most, so the feeds are read once a day (the roadmap feed alone is 2.6 MB) into state/news.csv, committed by the
+# workflow bot with the rest of state/ and read by build-dashboard.ps1 from there; ReadAt (Eastern, on every row) says when. A feed that
+# fails is a warning; a day when every feed fails keeps the previous file (the page then shows its older ReadAt).
+$newsCache = "$PSScriptRoot/../state/news.csv"
+$cached = @(if (Test-Path $newsCache) { Import-Csv $newsCache })
+$news = [System.Collections.Generic.List[object]]::new(); $readAt = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s')
+if ($env:WATCH_FEEDS -and -not ($cached.Count -and ([datetime]$readAt - [datetime]$cached[0].ReadAt).TotalHours -lt 24)) {
     $newsSince = [datetime]::UtcNow.AddDays(-45)
-    $text = { param($s) if ($s -is [System.Xml.XmlNode]) { $s = $s.InnerText }   # a CDATA or typed element (blog descriptions, Atom titles) comes as a node, not a string
-        [System.Net.WebUtility]::HtmlDecode(([regex]::Replace("$s", '<[^>]+>', ' ') -replace '\s+', ' ')).Trim() }   # HTML -> one line of plain text
     foreach ($line in "$env:WATCH_FEEDS" -split "`n") {
         $p = $line.Split('|', 3) | ForEach-Object Trim; if ($p.Count -lt 2 -or -not $p[1]) { continue }
         $label, $url, $filter = $p[0], $p[1], "$($p[2])"
@@ -301,13 +338,13 @@ if ($env:WATCH_FEEDS) {
                 if ($filter -and "$title $tags" -notmatch $filter) { continue }
                 $link = "$(if ($i.link -is [string]) { $i.link } else { @($i.link)[0].href })"
                 $sum = & $text $(if ($i.description) { $i.description } else { $i.summary }); if ($sum.Length -gt 300) { $sum = $sum.Substring(0, 297) + '...' }
-                $news.Add([pscustomobject]@{ Source = $label; Date = [TimeZoneInfo]::ConvertTimeFromUtc($d, $tz).ToString('s'); Title = $title; Url = $link; Summary = $sum; Tags = $tags })
+                $news.Add([pscustomobject]@{ Source = $label; Date = [TimeZoneInfo]::ConvertTimeFromUtc($d, $tz).ToString('s'); Title = $title; Url = $link; Summary = $sum; Tags = $tags; ReadAt = $readAt })
                 if (++$n -ge 25) { break }
             }
             Write-Host "Tech watch: $label, $n item(s)"
         } catch { $failures += "Tech watch: $label failed: $($_.Exception.Message.Substring(0, [math]::Min(200, $_.Exception.Message.Length)))" }   # cut: a parse error quotes the whole feed
     }
-    $newsAt = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s')
+    if ($news.Count) { $news | Export-Csv -Path $newsCache -NoTypeInformation -Encoding UTF8 }
 }
 # Carry-over: a client that could not be signed in from here is taken from CARRY_URL, a data.json that the laptop
 # collector (flow-runs.ps1) publishes to a gist whenever it runs. Its snapshot time is kept, so the page shows STALE
@@ -316,11 +353,11 @@ Remove-Item "$out/carry.json" -ErrorAction SilentlyContinue
 if ($blocked -and $env:CARRY_URL) {
     try {
         $c = Invoke-RestMethod -Uri "$($env:CARRY_URL)?t=$(Get-Date -UFormat %s)"   # cache-buster: gist raw URLs are cached ~5 min
-        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @(); pbidays = @(); pbifails = @(); apps = @(); connections = @() }
+        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @(); pbidays = @(); pbifails = @(); apps = @(); connections = @(); changes = @() }
         foreach ($name in $blocked) {
             if ($c.snapshots.$name) { $carry.snapshots[$name] = $c.snapshots.$name }
             $carry.flows += @($c.flows | Where-Object Client -eq $name); $carry.days += @($c.days | Where-Object Client -eq $name); $carry.fails += @($c.fails | Where-Object Client -eq $name)
-            $carry.powerbi += @($c.powerbi | Where-Object Client -eq $name); $carry.pbidays += @($c.pbidays | Where-Object Client -eq $name); $carry.pbifails += @($c.pbifails | Where-Object Client -eq $name); $carry.apps += @($c.apps | Where-Object Client -eq $name); $carry.connections += @($c.connections | Where-Object Client -eq $name)
+            $carry.powerbi += @($c.powerbi | Where-Object Client -eq $name); $carry.pbidays += @($c.pbidays | Where-Object Client -eq $name); $carry.pbifails += @($c.pbifails | Where-Object Client -eq $name); $carry.apps += @($c.apps | Where-Object Client -eq $name); $carry.connections += @($c.connections | Where-Object Client -eq $name); $carry.changes += @($c.changes | Where-Object Client -eq $name)
             Write-Host "$name`: carried over $(@($c.flows | Where-Object Client -eq $name).Count) flows from $($c.snapshots.$name)"
         }
         $carry | ConvertTo-Json -Depth 5 -Compress | Set-Content "$out/carry.json" -Encoding UTF8
@@ -336,8 +373,8 @@ if ($pbiRuns.Count) { $pbiRuns | Export-Csv -Path "$out/powerbi-runs.csv" -NoTyp
 if ($apps.Count) { $apps | Export-Csv -Path "$out/powerapps.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/powerapps.csv" -ErrorAction SilentlyContinue }
 if ($conns.Count) { $conns | Export-Csv -Path "$out/connections.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/connections.csv" -ErrorAction SilentlyContinue }
 if ($tickets.Count) { $tickets | Export-Csv -Path "$out/tickets.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/tickets.csv" -ErrorAction SilentlyContinue }
-if ($news.Count) { $news | Export-Csv -Path "$out/news.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/news.csv" -ErrorAction SilentlyContinue }
-& "$PSScriptRoot/build-dashboard.ps1" -HelpdeskAt $helpdeskAt -NewsAt $newsAt
+if ($changes.Count) { $changes | Export-Csv -Path "$out/changes.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/changes.csv" -ErrorAction SilentlyContinue }
+& "$PSScriptRoot/build-dashboard.ps1" -HelpdeskAt $helpdeskAt
 $failures | ForEach-Object { Write-Warning $_ }
 # Fail the job (GitHub emails the repo owner) only when nothing at all was collected: the collector itself is broken.
 if ($blocked.Count -eq @($clients).Count) { exit 1 }
