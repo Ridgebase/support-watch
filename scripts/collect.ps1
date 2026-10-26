@@ -14,7 +14,8 @@
 #   WATCH_FEEDS    optional: public RSS/Atom feeds for the Tech watch tab, one per line "Label | URL | optional regex" (see the Tech watch block)
 #   MC_<NAME>      optional per client: a second refresh token (get-refresh-token.ps1 -MessageCenter) that reads the client's Microsoft 365
 #                  Message Center into changes.csv: the service changes section of the Tech watch tab
-#   RT_<NAME>      the client's refresh token (from get-refresh-token.ps1), e.g. RT_SEMO
+#   RT_<NAME>      the client's refresh token (from get-refresh-token.ps1), e.g. RT_SEMO. Also exchanged for a Graph token that reads the tenant's
+#                  licences (licences.csv, tenants.csv, licusers.csv: the Licences tab), no extra consent needed
 #   NETLIFY_TOKEN  used by build-dashboard.ps1
 param([int]$Days = 7, [int]$Parallel = 8)
 $ErrorActionPreference = 'Stop'
@@ -312,6 +313,39 @@ foreach ($c in $clients) {
     } catch { $failures += "$($c.Name): Message Center failed: $(& $why $_.Exception)" }
 }
 
+# Licences: per client, from Graph with the Flow refresh token (no extra consent: subscribedSkus, directory/subscriptions and users read with the
+# signed-in account's directory access). licences.csv = one row per SKU: seats bought (prepaid, enabled), assigned, in grace (warning), suspended,
+# and the next renewal among its enabled subscriptions; tenants.csv = one row per client with the user counts; licusers.csv = disabled accounts
+# that still hold a paid licence (seats paid for nobody). A free, trial or developer plan has 10 000 seats or more: kept, muted on the page.
+$licences = [System.Collections.Generic.List[object]]::new(); $tenants = [System.Collections.Generic.List[object]]::new(); $licusers = [System.Collections.Generic.List[object]]::new()
+foreach ($c in $clients) {
+    if ($c.Name -in $blocked) { continue }
+    try {
+        $gt = (Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$($c.Tenant)/oauth2/v2.0/token" -Body @{ grant_type = 'refresh_token'; client_id = $clientId; refresh_token = [Environment]::GetEnvironmentVariable("RT_$($c.Name)"); scope = 'https://graph.microsoft.com/.default offline_access' }).access_token
+        $gh = @{ Authorization = "Bearer $gt"; ConsistencyLevel = 'eventual' }   # eventual: needed by $count on users
+        $subs = @((Invoke-RestMethod -Uri 'https://graph.microsoft.com/v1.0/directory/subscriptions' -Headers $gh -TimeoutSec 60).value); $skuName = @{}
+        foreach ($k in (Invoke-RestMethod -Uri 'https://graph.microsoft.com/v1.0/subscribedSkus' -Headers $gh -TimeoutSec 60).value) {
+            if ($k.prepaidUnits.enabled -gt 0 -and $k.prepaidUnits.enabled -lt 10000) { $skuName["$($k.skuId)"] = "$($k.skuPartNumber)" }   # paid plans only: a disabled account holding a free plan costs nothing
+            $ks = @($subs | Where-Object { "$($_.skuId)" -eq "$($k.skuId)" -and $_.status -eq 'Enabled' -and $_.nextLifecycleDateTime })
+            $next = @($ks | ForEach-Object { & $local $_.nextLifecycleDateTime } | Sort-Object)   # the earliest renewal among the SKU's live subscriptions
+            $licences.Add([pscustomobject]@{ Client = $c.Name; Sku = "$($k.skuPartNumber)"; Bought = [int]$k.prepaidUnits.enabled; Assigned = [int]$k.consumedUnits; Warning = [int]$k.prepaidUnits.warning
+                Suspended = [int]$k.prepaidUnits.suspended; Status = "$($k.capabilityStatus)"; Renewal = "$(if ($next) { $next[0] })"; Subscriptions = $ks.Count; Trial = [bool]($ks | Where-Object isTrial) })
+        }
+        $enabled = (Invoke-RestMethod -Uri 'https://graph.microsoft.com/v1.0/users?$count=true&$filter=accountEnabled eq true&$select=id&$top=1' -Headers $gh -TimeoutSec 60).'@odata.count'
+        $url = 'https://graph.microsoft.com/v1.0/users?$filter=accountEnabled eq false&$select=displayName,userPrincipalName,assignedLicenses&$top=999'; $disabled = 0
+        while ($url) {
+            $r = Invoke-RestMethod -Uri $url -Headers $gh -TimeoutSec 60; $disabled += @($r.value).Count
+            foreach ($u in $r.value) {
+                $paid = @($u.assignedLicenses | ForEach-Object { $skuName["$($_.skuId)"] } | Where-Object { $_ })
+                if ($paid) { $licusers.Add([pscustomobject]@{ Client = $c.Name; User = "$($u.displayName)"; Upn = "$($u.userPrincipalName)"; Licences = $paid.Count; Skus = ($paid -join ', ') }) }
+            }
+            $url = $r.'@odata.nextLink'
+        }
+        $tenants.Add([pscustomobject]@{ Client = $c.Name; Users = [int]$enabled; Disabled = [int]$disabled })
+        Write-Host "$($c.Name): licences, $($skuName.Count) SKU(s), $enabled enabled users, $disabled disabled"
+    } catch { $failures += "$($c.Name): licence collection failed: $(& $why $_.Exception)" }
+}
+
 # Tech watch, part 2: a general (not per client) feed of Microsoft product news, the tab's bottom section. WATCH_FEEDS (plain env in watch.yml,
 # cloud job only: the SEMO function has no such setting) lists public RSS 2.0 or Atom feeds, one per line, "Label | URL | optional regex":
 # an item is kept when its title or categories match the regex (the M365 roadmap feed lists every product, the regex keeps ours).
@@ -357,11 +391,12 @@ Remove-Item "$out/carry.json" -ErrorAction SilentlyContinue
 if ($blocked -and $env:CARRY_URL) {
     try {
         $c = Invoke-RestMethod -Uri "$($env:CARRY_URL)?t=$(Get-Date -UFormat %s)"   # cache-buster: gist raw URLs are cached ~5 min
-        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @(); pbidays = @(); pbifails = @(); apps = @(); connections = @(); changes = @() }
+        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @(); pbidays = @(); pbifails = @(); apps = @(); connections = @(); changes = @(); licences = @(); tenants = @(); licusers = @() }
         foreach ($name in $blocked) {
             if ($c.snapshots.$name) { $carry.snapshots[$name] = $c.snapshots.$name }
             $carry.flows += @($c.flows | Where-Object Client -eq $name); $carry.days += @($c.days | Where-Object Client -eq $name); $carry.fails += @($c.fails | Where-Object Client -eq $name)
             $carry.powerbi += @($c.powerbi | Where-Object Client -eq $name); $carry.pbidays += @($c.pbidays | Where-Object Client -eq $name); $carry.pbifails += @($c.pbifails | Where-Object Client -eq $name); $carry.apps += @($c.apps | Where-Object Client -eq $name); $carry.connections += @($c.connections | Where-Object Client -eq $name); $carry.changes += @($c.changes | Where-Object Client -eq $name)
+            $carry.licences += @($c.licences | Where-Object Client -eq $name); $carry.tenants += @($c.tenants | Where-Object Client -eq $name); $carry.licusers += @($c.licusers | Where-Object Client -eq $name)
             Write-Host "$name`: carried over $(@($c.flows | Where-Object Client -eq $name).Count) flows from $($c.snapshots.$name)"
         }
         $carry | ConvertTo-Json -Depth 5 -Compress | Set-Content "$out/carry.json" -Encoding UTF8
@@ -378,6 +413,9 @@ if ($apps.Count) { $apps | Export-Csv -Path "$out/powerapps.csv" -NoTypeInformat
 if ($conns.Count) { $conns | Export-Csv -Path "$out/connections.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/connections.csv" -ErrorAction SilentlyContinue }
 if ($tickets.Count) { $tickets | Export-Csv -Path "$out/tickets.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/tickets.csv" -ErrorAction SilentlyContinue }
 if ($changes.Count) { $changes | Export-Csv -Path "$out/changes.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/changes.csv" -ErrorAction SilentlyContinue }
+if ($licences.Count) { $licences | Export-Csv -Path "$out/licences.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/licences.csv" -ErrorAction SilentlyContinue }
+if ($tenants.Count) { $tenants | Export-Csv -Path "$out/tenants.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/tenants.csv" -ErrorAction SilentlyContinue }
+if ($licusers.Count) { $licusers | Export-Csv -Path "$out/licusers.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/licusers.csv" -ErrorAction SilentlyContinue }
 & "$PSScriptRoot/build-dashboard.ps1" -HelpdeskAt $helpdeskAt
 $failures | ForEach-Object { Write-Warning $_ }
 # Fail the job (GitHub emails the repo owner) only when nothing at all was collected: the collector itself is broken.

@@ -43,6 +43,11 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   (`out/tickets.csv`, Helpdesk tab: a ticket past its SLA deadline is red and counted in the tab's badge). A ticket belongs to the client
   whose optional `"Odoo"` field in `CLIENTS_JSON` equals the ticket customer's company, or whose tenant's first label is contained in that
   company name (`seguinmorris.com` ~ `Séguin Morris Inc`); the others show under All clients only.
+- The **Licences** tab: per client, from Graph with the same refresh token (`licences.csv`, `tenants.csv`, `licusers.csv`, SEMO's carried over),
+  one row per plan with the seats bought, assigned, in grace or suspended and the next renewal date, the enabled user count, and the disabled
+  accounts that still hold a paid licence. Red (and the tab's badge): more seats assigned than bought, seats in grace, a plan not enabled, a renewal
+  within 30 days; yellow: suspended seats, or a fifth of a paid plan's seats unassigned. Free, trial and expired plans are hidden by a switch.
+  Plan names are a hand-kept map in the template (`SKU`); an unknown code shows as is.
 - The **Tech watch** tab has two sections. Top, **service changes**: each client's Microsoft 365 Message Center (Graph, the place Microsoft
   announces retirements, licensing and policy changes with the services affected and an action date), messages of the last 60 days that are
   more than "Stay informed" and that match `WATCH_SERVICES` (plain env in `watch.yml`, a regex on the services and title: Power Platform,
