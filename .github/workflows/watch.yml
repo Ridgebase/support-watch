@@ -100,7 +100,7 @@ jobs:
         run: |
           today=$(date -u +%F)
           [ "$(cat state/last-run.txt 2>/dev/null)" = "$today" ] || echo "$today" > state/last-run.txt
-          git add state/last-run.txt state/alerts.json state/news.csv state/launches.csv state/audit-queries.json
+          git add state/
           if ! git diff --cached --quiet; then
             git config user.name  "support-watch bot"
             git config user.email "support-watch@users.noreply.github.com"
