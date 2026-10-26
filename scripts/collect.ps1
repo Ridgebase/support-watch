@@ -87,8 +87,10 @@ foreach ($c in $clients) {
         # The user listing omits most solution flows, even ones this account created (SEMO, 2026-10-26: 59 of 265 listed, "RB - Estimation -
         # Generate Excel forecast" among the missing): with an admin role the admin listing gives every flow of the environment. Stopped flows
         # are skipped there (150 in SEMO, mostly Microsoft's managed solutions); without the role, the user listing as before, stopped ones included.
-        $flows = try { @(Get-All "$api/scopes/admin/environments/$($env['name'])/v2/flows?$ver" $h | Where-Object { $_['properties']['state'] -eq 'Started' }) }
-                 catch { @(Get-All "$api/environments/$($env['name'])/flows?$ver" $h) }
+        # The user listing's objects carry definitionSummary (trigger type), the admin listing's do not: a flow in both keeps the user's object.
+        $flows = try { @(Get-All "$api/scopes/admin/environments/$($env['name'])/v2/flows?$ver" $h | Where-Object { $_['properties']['state'] -eq 'Started' }) } catch { $null }
+        $mine = @{}; foreach ($f in @(Get-All "$api/environments/$($env['name'])/flows?$ver" $h)) { $mine[$f['name']] = $f }
+        $flows = if ($null -eq $flows) { @($mine.Values) } else { @($flows | ForEach-Object { if ($mine[$_['name']]) { $mine[$_['name']] } else { $_ } }) }
         Write-Host "$($c.Name): $($env['properties']['displayName']): $($flows.Count) flows listed, reading runs"
         # One runs request per flow, in parallel. Runs come newest first: stop paging once a page ends before the window.
         # The Flow API returns 503/504 timeouts now and then; without retries the flow lost all its runs for that build and showed UNREADABLE.
