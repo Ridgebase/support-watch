@@ -6,11 +6,12 @@
 # policy revokes it the workflow fails and GitHub emails you: rerun this and update the secret.
 # -MessageCenter: a second token per client, for the Microsoft 365 Message Center (Tech watch tab, secret MC_<NAME>). The Azure CLI app is not
 # pre-authorized for that Graph permission, so this one signs in through the Microsoft Graph PowerShell app instead; the account needs a role
-# that reads the Message Center (Global Reader, Message Center Reader, Global Administrator, ...) and consents to ServiceMessage.Read.All at sign-in.
+# that reads the Message Center (Global Reader, Message Center Reader, Global Administrator, ...) and consents at sign-in to ServiceMessage.Read.All
+# and AuditLogsQuery.Read.All (the unified audit log: app launches per user, the Licences tab's active users; the account needs Audit Reader or Global Reader too).
 param([Parameter(Mandatory)][string]$Tenant, [Parameter(Mandatory)][string]$Out, [switch]$MessageCenter)
 
 $clientId = if ($MessageCenter) { '14d82eec-204b-4c2f-b7e8-296a70dab67e' } else { '04b07795-8ddb-461a-bbee-02f9e1bf7b46' }   # Microsoft Graph PowerShell / Azure CLI public clients: both allow device code; the Azure CLI one is pre-consented for the Flow service
-$scope    = if ($MessageCenter) { 'https://graph.microsoft.com/ServiceMessage.Read.All offline_access' } else { 'https://service.flow.microsoft.com//.default offline_access' }
+$scope    = if ($MessageCenter) { 'https://graph.microsoft.com/ServiceMessage.Read.All https://graph.microsoft.com/AuditLogsQuery.Read.All offline_access' } else { 'https://service.flow.microsoft.com//.default offline_access' }
 $base     = "https://login.microsoftonline.com/$Tenant/oauth2/v2.0"
 
 $dc = Invoke-RestMethod -Method Post -Uri "$base/devicecode" -Body @{ client_id = $clientId; scope = $scope }
