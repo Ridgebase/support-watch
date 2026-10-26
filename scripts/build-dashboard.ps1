@@ -16,6 +16,7 @@ param(
     [string]$TenantsCsv = "$PSScriptRoot/../out/tenants.csv",
     [string]$LicUsersCsv = "$PSScriptRoot/../out/licusers.csv",
     [string]$EnvCapCsv = "$PSScriptRoot/../out/envcap.csv",
+    [string]$LaunchesCsv = "$PSScriptRoot/../out/launches.csv",
     [string]$NewsCsv = "$PSScriptRoot/../state/news.csv",   # read once a day by collect.ps1, committed with state/
     [string]$OutDir = "$PSScriptRoot/../out/site",
     [string]$Carry  = "$PSScriptRoot/../out/carry.json"
@@ -32,6 +33,7 @@ $licences = @(if (Test-Path $LicCsv) { @(Import-Csv $LicCsv) } else { @() })   #
 $tenants  = @(if (Test-Path $TenantsCsv) { @(Import-Csv $TenantsCsv) } else { @() })
 $licusers = @(if (Test-Path $LicUsersCsv) { @(Import-Csv $LicUsersCsv) } else { @() })
 $envcap   = @(if (Test-Path $EnvCapCsv) { @(Import-Csv $EnvCapCsv) } else { @() })   # Licences tab: Dataverse capacity and add-ons per environment
+$launches = @(if (Test-Path $LaunchesCsv) { @(Import-Csv $LaunchesCsv) } else { @() })   # app launches from the audit log, 30 days: users per app, environment and client
 $tickets = @(if (Test-Path $TicketsCsv) { @(Import-Csv $TicketsCsv) } else { @() })   # Odoo Helpdesk tickets in progress, from collect.ps1 (cloud job only, never carried over)
 $pbiRuns = @(if (Test-Path $PbiRunsCsv) { @(Import-Csv $PbiRunsCsv) } else { @() })   # one row per Power BI refresh in the window, from collect.ps1
 $pbidays = @(); $pbifails = @()
@@ -108,12 +110,12 @@ if (Test-Path $Carry) {
     $c = Get-Content $Carry -Raw -Encoding UTF8 | ConvertFrom-Json
     foreach ($p in $c.snapshots.PSObject.Properties) { $snapshots[$p.Name] = $p.Value }
     $flows += @($c.flows); $days += @($c.days); $fails += @($c.fails); $powerbi += @($c.powerbi); $pbidays += @($c.pbidays); if ($c.pbifails) { $pbifails += @($c.pbifails) }; $apps += @($c.apps); $conns += @($c.connections); if ($c.changes) { $changes += @($c.changes) }
-    if ($c.licences) { $licences += @($c.licences) }; if ($c.tenants) { $tenants += @($c.tenants) }; if ($c.licusers) { $licusers += @($c.licusers) }; if ($c.envcap) { $envcap += @($c.envcap) }
+    if ($c.licences) { $licences += @($c.licences) }; if ($c.tenants) { $tenants += @($c.tenants) }; if ($c.licusers) { $licusers += @($c.licusers) }; if ($c.envcap) { $envcap += @($c.envcap) }; if ($c.launches) { $launches += @($c.launches) }
 }
 
 # Credentials with a fixed expiry, from EXPIRIES ("label=YYYY-MM-DD; label=YYYY-MM-DD", plain env in watch.yml, dates only, never the secrets): shown on the page, mailed by notify.ps1.
 $expiries = @(foreach ($e in "$env:EXPIRIES" -split ';') { if ($e -match '^\s*(.+?)\s*=\s*(\d{4}-\d{2}-\d{2})\s*$') { [pscustomobject]@{ Name = $Matches[1]; Date = $Matches[2] } } })
-$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi; pbidays = $pbidays; pbifails = $pbifails; apps = $apps; connections = $conns; tickets = $tickets; helpdesk = $HelpdeskAt; changes = $changes; licences = $licences; tenants = $tenants; licusers = $licusers; envcap = $envcap; news = $news; newsAt = "$(if ($news.Count) { $news[0].ReadAt })"; expiries = $expiries } | ConvertTo-Json -Depth 5 -Compress
+$data = [pscustomobject]@{ snapshots = $snapshots; flows = $flows; days = $days; fails = $fails; powerbi = $powerbi; pbidays = $pbidays; pbifails = $pbifails; apps = $apps; connections = $conns; tickets = $tickets; helpdesk = $HelpdeskAt; changes = $changes; licences = $licences; tenants = $tenants; licusers = $licusers; envcap = $envcap; launches = $launches; news = $news; newsAt = "$(if ($news.Count) { $news[0].ReadAt })"; expiries = $expiries } | ConvertTo-Json -Depth 5 -Compress
 $data = $data.Replace('</', '<\/')   # a "</script>" inside any text (a connection error, a flow name) would end the page's data script; "<\/" is the same string in JSON
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $html = (Get-Content "$PSScriptRoot/dashboard.template.html" -Raw -Encoding UTF8).Replace('__DATA__', $data)

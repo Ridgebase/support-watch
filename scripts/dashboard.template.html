@@ -242,14 +242,19 @@ function render() {
   const appCls = a => ['Disabled', 'Deleted'].includes(a.OwnerState) ? 'bad' : '';
   const byClient = (a, b) => a.Client.localeCompare(b.Client) || a.Environment.localeCompare(b.Environment);
   const conns = (data.connections || []).filter(k => (!client || k.Client === client) && (!only || connCls(k) === 'bad')).sort((a, b) => (connCls(a) === 'bad' ? 0 : 1) - (connCls(b) === 'bad' ? 0 : 1) || byClient(a, b) || a.Connection.localeCompare(b.Connection));
+  // App launches (audit log, 30 days): one row per app, one per environment (AppId '') and one per client (EnvironmentId ''), with distinct users and launches.
+  const lc = s => String(s || '').toLowerCase();   // the audit log writes "default-<tenant>" where the admin APIs write "Default-<tenant>"
+  const launchOf = (c, envId, appId) => (data.launches || []).find(l => l.Client === c && lc(l.EnvironmentId) === lc(envId) && lc(l.AppId) === lc(appId));
+  const usersOf = (c, envId, appId) => { const l = launchOf(c, envId, appId); return l ? `<span title="${l.Launches} launches">${l.Users}</span>` : (data.launches || []).some(l => l.Client === c) ? '0' : '—'; };
   const apps = (data.apps || []).filter(a => (!client || a.Client === client) && (!only || appCls(a) === 'bad')).sort((a, b) => (appCls(a) === 'bad' ? 0 : 1) - (appCls(b) === 'bad' ? 0 : 1) || byClient(a, b) || a.App.localeCompare(b.App));
   const appsBad = (data.connections || []).filter(k => (!client || k.Client === client) && connCls(k) === 'bad').length + (data.apps || []).filter(a => (!client || a.Client === client) && appCls(a) === 'bad').length;
   document.querySelector('.tabs [data-tab="apps"]').innerHTML = 'Power Apps' + (appsBad ? `<span class="badge">${appsBad}</span>` : '');
   if (tab === 'apps') {
     if (!conns.length && !apps.length) h += '<p class="muted">No Power Apps data to show.</p>';
     if (apps.length) {
-      h += `<h2 id="apps">Canvas apps <span class="muted">(${apps.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>App</th><th>Owner</th><th>Connectors</th><th>Premium</th><th>Last modified</th><th>Published</th></tr></thead><tbody>`;
-      for (const a of apps) h += `<tr class="${appCls(a)}"><td>${esc(a.Client)}</td><td>${esc(a.Environment)}</td><td class="flow">${esc(a.App)}${copyBtn(a.Url)}</td><td>${esc(a.Owner)}${appCls(a) ? ` <b class="c-bad">(account ${esc(a.OwnerState.toLowerCase())})</b>` : ''}</td><td class="text">${esc(a.Connectors)}</td><td>${String(a.Premium).toLowerCase() === 'true' ? 'Yes' : 'No'}</td><td class="date">${fmt(a.Modified)}</td><td class="date">${fmt(a.Published)}</td></tr>`;
+      // Users, 30 d: distinct accounts that opened the app in the last 30 days, from the audit log (launches rows per app; blank when the client has no MC_ token yet).
+      h += `<h2 id="apps">Canvas apps <span class="muted">(${apps.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>App</th><th>Owner</th><th>Connectors</th><th>Premium</th><th class="num" title="Distinct users who opened the app in the last 30 days (audit log)">Users, 30 d</th><th>Last modified</th><th>Published</th></tr></thead><tbody>`;
+      for (const a of apps) h += `<tr class="${appCls(a)}"><td>${esc(a.Client)}</td><td>${esc(a.Environment)}</td><td class="flow">${esc(a.App)}${copyBtn(a.Url)}</td><td>${esc(a.Owner)}${appCls(a) ? ` <b class="c-bad">(account ${esc(a.OwnerState.toLowerCase())})</b>` : ''}</td><td class="text">${esc(a.Connectors)}</td><td>${String(a.Premium).toLowerCase() === 'true' ? 'Yes' : 'No'}</td><td class="num">${usersOf(a.Client, a.EnvironmentId, a.AppId)}</td><td class="date">${fmt(a.Modified)}</td><td class="date">${fmt(a.Published)}</td></tr>`;
       h += '</tbody></table></div>';
     }
     if (conns.length) {
@@ -316,7 +321,7 @@ function render() {
       h += `<h2 id="plans">Plans <span class="muted">(${lic.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Plan</th><th class="num">Bought</th><th class="num">Assigned</th><th class="num">Available</th><th>Renewal</th><th>Status</th></tr></thead><tbody>`;
       for (const r of lic) {
         const st = [r.Status === 'Enabled' ? 'Active' : r.Status, +r.Warning ? `${r.Warning} in grace` : '', +r.Suspended ? `${r.Suspended} suspended` : '', String(r.Trial) === 'True' ? 'trial' : ''].filter(Boolean).join(' · ');
-        h += `<tr class="${licCls(r)}"><td>${esc(r.Client)}</td><td class="flow" title="${esc(r.Sku)}">${esc(skuName(r.Sku))}${perApp(r) ? ' <span class="muted">(passes allocated to environments, see below)</span>' : ''}</td><td class="num">${free(r) ? '—' : r.Bought}</td><td class="num">${assignedOf(r)}</td><td class="num ${unusedOf(r) >= 3 ? 'c-warn' : ''}">${free(r) ? '—' : +r.Bought - assignedOf(r)}</td><td class="date ${r.Renewal && renewIn(r) < 30 ? 'c-bad' : ''}">${r.Renewal ? r.Renewal.slice(0, 10) + ` (${renewIn(r)} d)` : '—'}</td><td class="${licCls(r) === 'bad' ? 'c-bad' : ''}">${esc(st)}</td></tr>`;
+        h += `<tr class="${licCls(r)}"><td>${esc(r.Client)}</td><td class="flow" title="${esc(r.Sku)}">${esc(skuName(r.Sku))}${perApp(r) ? ` <span class="muted">(passes allocated to environments, see below${launchOf(r.Client, '', '') ? `; ${launchOf(r.Client, '', '').Users} users opened an app in 30 days` : ''})</span>` : ''}</td><td class="num">${free(r) ? '—' : r.Bought}</td><td class="num">${assignedOf(r)}</td><td class="num ${unusedOf(r) >= 3 ? 'c-warn' : ''}">${free(r) ? '—' : +r.Bought - assignedOf(r)}</td><td class="date ${r.Renewal && renewIn(r) < 30 ? 'c-bad' : ''}">${r.Renewal ? r.Renewal.slice(0, 10) + ` (${renewIn(r)} d)` : '—'}</td><td class="${licCls(r) === 'bad' ? 'c-bad' : ''}">${esc(st)}</td></tr>`;
       }
       h += '</tbody></table></div>';
     }
@@ -330,8 +335,9 @@ function render() {
     }
     const envs = envAll.slice().sort((a, b) => a.Client.localeCompare(b.Client) || b.DbUsed - a.DbUsed);
     if (envs.length) {
-      h += `<h2 id="envs">Environments <span class="muted">(${envs.length}, storage used and add-ons allocated)</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Type</th><th class="num">Database</th><th class="num">File</th><th class="num">Log</th><th class="num">Per-app passes</th><th class="num">Per-flow plans</th><th>Other add-ons</th></tr></thead><tbody>`;
-      for (const e of envs) h += `<tr><td>${esc(e.Client)}</td><td class="flow">${esc(e.Environment)}</td><td>${esc(e.Type)}</td><td class="num">${gb(+e.DbUsed)}</td><td class="num">${gb(+e.FileUsed)}</td><td class="num">${gb(+e.LogUsed)}</td><td class="num">${+e.AppPass || '—'}</td><td class="num">${+e.PerFlow || '—'}</td><td class="flow">${esc(e.Addons || '—')}</td></tr>`;
+      // Active users, 30 d: distinct accounts that opened any app in the environment (audit log). Against the per-app passes allocated to it: the usage the passes exist for.
+      h += `<h2 id="envs">Environments <span class="muted">(${envs.length}, storage used, add-ons allocated, app users)</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Type</th><th class="num">Database</th><th class="num">File</th><th class="num">Log</th><th class="num">Per-app passes</th><th class="num" title="Distinct users who opened an app in the environment in the last 30 days (audit log)">App users, 30 d</th><th class="num">Per-flow plans</th><th>Other add-ons</th></tr></thead><tbody>`;
+      for (const e of envs) h += `<tr><td>${esc(e.Client)}</td><td class="flow">${esc(e.Environment)}</td><td>${esc(e.Type)}</td><td class="num">${gb(+e.DbUsed)}</td><td class="num">${gb(+e.FileUsed)}</td><td class="num">${gb(+e.LogUsed)}</td><td class="num">${+e.AppPass || '—'}</td><td class="num">${usersOf(e.Client, e.EnvironmentId, '')}</td><td class="num">${+e.PerFlow || '—'}</td><td class="flow">${esc(e.Addons || '—')}</td></tr>`;
       h += '</tbody></table></div>';
     }
     if (luAll.length) {

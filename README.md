@@ -49,7 +49,10 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   within 30 days; yellow: suspended seats, or a fifth of a paid plan's seats unassigned. Free, trial and expired plans are hidden by a switch.
   Plan names are a hand-kept map in the template (`SKU`); an unknown code shows as is. Below the plans, every environment of the tenant
   (`out/envcap.csv`, admin API) with its Dataverse database, file and log storage used and the add-ons allocated to it: per-app passes are
-  assigned to environments, never to users, so that allocation is what the per-app plan row shows as assigned. Above it, the tenant's Dataverse
+  assigned to environments, never to users, so that allocation is what the per-app plan row shows as assigned, and the number of distinct users
+  who opened an app in the environment in the last 30 days sits next to it: the audit log's `LaunchPowerApp` events, read through Graph with the
+  `MC_<NAME>` token (one asynchronous audit query a day per client, its id kept in `state/audit-queries.json`, the result in
+  `state/launches.csv`; the Power Apps tab shows the same per app). Above it, the tenant's Dataverse
   capacity as the admin center's Capacity page shows it (`tenants.csv`, Power Platform API `licensing/tenantCapacity`): used against entitled
   per storage type, red at 100% or when Microsoft reports the capacity exceeded, yellow from 80%.
 - The **Tech watch** tab has two sections. Top, **service changes**: each client's Microsoft 365 Message Center (Graph, the place Microsoft

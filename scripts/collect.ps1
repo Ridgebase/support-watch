@@ -13,7 +13,8 @@
 #   ODOO_URL, ODOO_USER, ODOO_KEY  optional: the Odoo Helpdesk tickets in progress go to tickets.csv (see the Helpdesk block)
 #   WATCH_FEEDS    optional: public RSS/Atom feeds for the Tech watch tab, one per line "Label | URL | optional regex" (see the Tech watch block)
 #   MC_<NAME>      optional per client: a second refresh token (get-refresh-token.ps1 -MessageCenter) that reads the client's Microsoft 365
-#                  Message Center into changes.csv: the service changes section of the Tech watch tab
+#                  Message Center into changes.csv (the service changes section of the Tech watch tab) and the audit log's app launches into
+#                  launches.csv (active users per app and environment, Power Apps and Licences tabs)
 #   RT_<NAME>      the client's refresh token (from get-refresh-token.ps1), e.g. RT_SEMO. Also exchanged for a Graph token that reads the tenant's
 #                  licences (licences.csv, tenants.csv, licusers.csv: the Licences tab), no extra consent needed
 #   NETLIFY_TOKEN  used by build-dashboard.ps1
@@ -328,6 +329,48 @@ foreach ($c in $clients) {
     } catch { $failures += "$($c.Name): Message Center failed: $(& $why $_.Exception)" }
 }
 
+# App launches: who actually opens the apps, from the unified audit log (LaunchPowerApp events, last 30 days), the only source Microsoft exposes
+# (tested 2026-10-26: no usage endpoint in the Power Apps, admin or Power Platform APIs; the Graph usage reports need a permission the Flow
+# sign-in app cannot request). Same MC_<NAME> token, with AuditLogsQuery.Read.All. A Graph audit query takes about 5 minutes to run, so it is
+# asynchronous: one run creates it (id kept in audit-queries.json), a later run reads its records; once a day, like the feeds. launches.csv:
+# distinct users and launches per app, per environment (AppId '') and per client (EnvironmentId ''). The cache lives in state/ (committed by the
+# bot); the function has no state/ and uses its temp dir, which may be wiped: then it simply queries again. Always copied to out/ for the page.
+$auditDir = if (Test-Path "$PSScriptRoot/../state") { "$PSScriptRoot/../state" } else { $out }
+$launchFile = "$auditDir/launches.csv"; $pendFile = "$auditDir/audit-queries.json"; $nowLocal = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s')
+$launches = [System.Collections.Generic.List[object]]::new(); if (Test-Path $launchFile) { $launches.AddRange(@(Import-Csv $launchFile)) }
+$pending = if ((Test-Path $pendFile) -and (Get-Content $pendFile -Raw)) { Get-Content $pendFile -Raw | ConvertFrom-Json -AsHashtable } else { @{} }
+foreach ($c in $clients) {
+    $mrt = [Environment]::GetEnvironmentVariable("MC_$($c.Name)")
+    if (-not $mrt -or $c.Name -in @($env:CARRY_CLIENTS -split ',' | ForEach-Object Trim)) { continue }
+    $mine = @($launches | Where-Object Client -eq $c.Name)
+    if ($mine -and ([datetime]$nowLocal - [datetime]$mine[0].ReadAt).TotalHours -lt 24 -and -not $pending[$c.Name]) { continue }   # read today already
+    try {
+        $gt = (Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$($c.Tenant)/oauth2/v2.0/token" -Body @{ grant_type = 'refresh_token'; client_id = '14d82eec-204b-4c2f-b7e8-296a70dab67e'; refresh_token = $mrt; scope = 'https://graph.microsoft.com/AuditLogsQuery.Read.All offline_access' }).access_token
+        $gh = @{ Authorization = "Bearer $gt"; 'Content-Type' = 'application/json' }
+        if (-not $pending[$c.Name]) {
+            $q = Invoke-RestMethod -Method Post -Uri 'https://graph.microsoft.com/v1.0/security/auditLog/queries' -Headers $gh -TimeoutSec 60 -Body (@{ '@odata.type' = '#microsoft.graph.security.auditLogQuery'; displayName = "support-watch launches $($c.Name)"
+                filterStartDateTime = [datetime]::UtcNow.AddDays(-30).ToString('o'); filterEndDateTime = [datetime]::UtcNow.ToString('o'); operationFilters = @('LaunchPowerApp') } | ConvertTo-Json)
+            $pending[$c.Name] = "$($q.id)"; Write-Host "$($c.Name): audit query $($q.id) created, records read at a later run"; continue
+        }
+        $st = (Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/security/auditLog/queries/$($pending[$c.Name])" -Headers $gh -TimeoutSec 60).status
+        if ($st -in 'notStarted', 'running') { Write-Host "$($c.Name): audit query still $st"; continue }
+        $qid = $pending[$c.Name]; $pending.Remove($c.Name)
+        if ($st -ne 'succeeded') { throw "audit query $st" }
+        $recs = @(); $u = "https://graph.microsoft.com/v1.0/security/auditLog/queries/$qid/records?`$top=999"
+        while ($u) { $r = Invoke-RestMethod -Uri $u -Headers $gh -TimeoutSec 60; $recs += $r.value; $u = $r.'@odata.nextLink' }
+        # The app, environment and user are in auditData.JsonPropertiesCollection, a JSON string with dotted keys (the record type is PowerPlatformAdministratorActivity, not powerAppsApp).
+        $ev = @(foreach ($x in $recs) { $j = $x.auditData.JsonPropertiesCollection | ConvertFrom-Json
+            [pscustomobject]@{ User = "$($x.userPrincipalName)"; App = "$($j.'powerplatform.analytics.resource.power_app.display_name')"; AppId = "$($j.'powerplatform.analytics.resource.power_app.id')"; Env = "$($j.'powerplatform.analytics.resource.environment.name')"; EnvId = "$($j.'powerplatform.analytics.resource.environment.id')" } })
+        $launches.RemoveAll({ param($r) $r.Client -eq $c.Name }) | Out-Null
+        $row = { param($env, $envId, $app, $appId, $g) [pscustomobject]@{ Client = $c.Name; Environment = $env; EnvironmentId = $envId; App = $app; AppId = $appId; Users = @($g | ForEach-Object User | Sort-Object -Unique).Count; Launches = @($g).Count; ReadAt = $nowLocal } }
+        $launches.Add((& $row '' '' '' '' $ev))
+        foreach ($eg in $ev | Group-Object EnvId) { $launches.Add((& $row $eg.Group[0].Env $eg.Name '' '' $eg.Group)); foreach ($ag in $eg.Group | Group-Object AppId) { $launches.Add((& $row $eg.Group[0].Env $eg.Name $ag.Group[0].App $ag.Name $ag.Group)) } }
+        Write-Host "$($c.Name): $($recs.Count) app launches by $(@($ev | ForEach-Object User | Sort-Object -Unique).Count) users in 30 days"
+    } catch { $failures += "$($c.Name): app launches failed: $(& $why $_.Exception)" }
+}
+$pending | ConvertTo-Json -Compress | Set-Content $pendFile -Encoding UTF8
+if ($launches.Count) { $launches | Export-Csv -Path $launchFile -NoTypeInformation -Encoding UTF8; if ($launchFile -ne "$out/launches.csv") { Copy-Item $launchFile "$out/launches.csv" } } else { Remove-Item "$out/launches.csv" -ErrorAction SilentlyContinue }
+
 # Licences: per client, from Graph with the Flow refresh token (no extra consent: subscribedSkus, directory/subscriptions and users read with the
 # signed-in account's directory access). licences.csv = one row per SKU: seats bought (prepaid, enabled), assigned, in grace (warning), suspended,
 # and the next renewal among its enabled subscriptions; tenants.csv = one row per client with the user counts and the tenant's Dataverse capacity
@@ -417,12 +460,12 @@ Remove-Item "$out/carry.json" -ErrorAction SilentlyContinue
 if ($blocked -and $env:CARRY_URL) {
     try {
         $c = Invoke-RestMethod -Uri "$($env:CARRY_URL)?t=$(Get-Date -UFormat %s)"   # cache-buster: gist raw URLs are cached ~5 min
-        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @(); pbidays = @(); pbifails = @(); apps = @(); connections = @(); changes = @(); licences = @(); tenants = @(); licusers = @(); envcap = @() }
+        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @(); pbidays = @(); pbifails = @(); apps = @(); connections = @(); changes = @(); licences = @(); tenants = @(); licusers = @(); envcap = @(); launches = @() }
         foreach ($name in $blocked) {
             if ($c.snapshots.$name) { $carry.snapshots[$name] = $c.snapshots.$name }
             $carry.flows += @($c.flows | Where-Object Client -eq $name); $carry.days += @($c.days | Where-Object Client -eq $name); $carry.fails += @($c.fails | Where-Object Client -eq $name)
             $carry.powerbi += @($c.powerbi | Where-Object Client -eq $name); $carry.pbidays += @($c.pbidays | Where-Object Client -eq $name); $carry.pbifails += @($c.pbifails | Where-Object Client -eq $name); $carry.apps += @($c.apps | Where-Object Client -eq $name); $carry.connections += @($c.connections | Where-Object Client -eq $name); $carry.changes += @($c.changes | Where-Object Client -eq $name)
-            $carry.licences += @($c.licences | Where-Object Client -eq $name); $carry.tenants += @($c.tenants | Where-Object Client -eq $name); $carry.licusers += @($c.licusers | Where-Object Client -eq $name); $carry.envcap += @($c.envcap | Where-Object Client -eq $name)
+            $carry.licences += @($c.licences | Where-Object Client -eq $name); $carry.tenants += @($c.tenants | Where-Object Client -eq $name); $carry.licusers += @($c.licusers | Where-Object Client -eq $name); $carry.envcap += @($c.envcap | Where-Object Client -eq $name); $carry.launches += @($c.launches | Where-Object Client -eq $name)
             Write-Host "$name`: carried over $(@($c.flows | Where-Object Client -eq $name).Count) flows from $($c.snapshots.$name)"
         }
         $carry | ConvertTo-Json -Depth 5 -Compress | Set-Content "$out/carry.json" -Encoding UTF8
