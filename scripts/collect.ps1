@@ -40,6 +40,7 @@ $pbi       = [System.Collections.Generic.List[object]]::new()   # one row per se
 $pbiRuns   = [System.Collections.Generic.List[object]]::new()   # one row per Power BI refresh in the window: the tab's recap and the weekly mail (same shape as flow runs)
 $apps      = [System.Collections.Generic.List[object]]::new()   # one row per canvas app: owner, sharing, connectors
 $conns     = [System.Collections.Generic.List[object]]::new()   # one row per connection: its status (an expired credential is the usual "the app stopped working")
+$envcap    = [System.Collections.Generic.List[object]]::new()   # one row per environment of the tenant: Dataverse capacity used and rated, add-ons allocated (per-app passes...)
 $failures  = @()
 $toLocal   = { param($s) if ($s) { [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal), $tz).ToString('s') } else { '' } }
 $blocked   = @()   # clients whose sign-in failed this run
@@ -240,6 +241,20 @@ foreach ($c in $clients) {
             }
         }
         Write-Host "$($c.Name): Power Apps, $(@($apps | Where-Object Client -eq $c.Name).Count) app(s), $(@($conns | Where-Object Client -eq $c.Name).Count) connection(s)$scopeNote"
+        # Dataverse capacity and add-on allocations, for every environment of the tenant (not only the listed ones: capacity is pooled tenant-wide).
+        # actualConsumption = used. (ratedConsumption is the billed figure, 1 GB minimum per production database, not an entitlement; the tenant's
+        # entitlement is not readable through any API this token reaches, so the page shows what is used.) Add-ons (per-app passes, per-flow plans,
+        # AI credits...) are allocated to an environment: the only place a per-app pass is ever "assigned" (Licences tab).
+        $r = Invoke-RestMethod -Uri 'https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments?api-version=2021-04-01&$expand=properties.capacity,properties.addons' -Headers $ah -TimeoutSec 60
+        foreach ($e in $r.value) {
+            $cap = @{}; foreach ($x in $e.properties.capacity) { $cap["$($x.capacityType)"] = $x }
+            $add = @{}; foreach ($x in $e.properties.addons) { $add["$($x.addonType)"] = [int]$x.allocated }
+            $mb = { param($t) [math]::Round([double]$cap[$t].actualConsumption) }   # MB
+            $envcap.Add([pscustomobject]@{ Client = $c.Name; Environment = "$($e.properties.displayName)"; EnvironmentId = "$($e.name)"; Type = "$($e.properties.environmentSku)"
+                DbUsed = (& $mb Database); FileUsed = (& $mb File); LogUsed = (& $mb Log); AppPass = [int]$add['AppPass']; PerFlow = [int]$add['PerFlowPlan']
+                Addons = (@($add.GetEnumerator() | Where-Object { $_.Value -and $_.Key -notin 'AppPass', 'PerFlowPlan' } | Sort-Object Key | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ', ') })
+        }
+        Write-Host "$($c.Name): $($r.value.Count) environment(s) with capacity and add-ons"
     } catch { $failures += "$($c.Name): Power Apps collection failed: $(& $why $_.Exception)" }
 }
 
@@ -391,12 +406,12 @@ Remove-Item "$out/carry.json" -ErrorAction SilentlyContinue
 if ($blocked -and $env:CARRY_URL) {
     try {
         $c = Invoke-RestMethod -Uri "$($env:CARRY_URL)?t=$(Get-Date -UFormat %s)"   # cache-buster: gist raw URLs are cached ~5 min
-        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @(); pbidays = @(); pbifails = @(); apps = @(); connections = @(); changes = @(); licences = @(); tenants = @(); licusers = @() }
+        $carry = @{ snapshots = @{}; flows = @(); days = @(); fails = @(); powerbi = @(); pbidays = @(); pbifails = @(); apps = @(); connections = @(); changes = @(); licences = @(); tenants = @(); licusers = @(); envcap = @() }
         foreach ($name in $blocked) {
             if ($c.snapshots.$name) { $carry.snapshots[$name] = $c.snapshots.$name }
             $carry.flows += @($c.flows | Where-Object Client -eq $name); $carry.days += @($c.days | Where-Object Client -eq $name); $carry.fails += @($c.fails | Where-Object Client -eq $name)
             $carry.powerbi += @($c.powerbi | Where-Object Client -eq $name); $carry.pbidays += @($c.pbidays | Where-Object Client -eq $name); $carry.pbifails += @($c.pbifails | Where-Object Client -eq $name); $carry.apps += @($c.apps | Where-Object Client -eq $name); $carry.connections += @($c.connections | Where-Object Client -eq $name); $carry.changes += @($c.changes | Where-Object Client -eq $name)
-            $carry.licences += @($c.licences | Where-Object Client -eq $name); $carry.tenants += @($c.tenants | Where-Object Client -eq $name); $carry.licusers += @($c.licusers | Where-Object Client -eq $name)
+            $carry.licences += @($c.licences | Where-Object Client -eq $name); $carry.tenants += @($c.tenants | Where-Object Client -eq $name); $carry.licusers += @($c.licusers | Where-Object Client -eq $name); $carry.envcap += @($c.envcap | Where-Object Client -eq $name)
             Write-Host "$name`: carried over $(@($c.flows | Where-Object Client -eq $name).Count) flows from $($c.snapshots.$name)"
         }
         $carry | ConvertTo-Json -Depth 5 -Compress | Set-Content "$out/carry.json" -Encoding UTF8
@@ -416,6 +431,7 @@ if ($changes.Count) { $changes | Export-Csv -Path "$out/changes.csv" -NoTypeInfo
 if ($licences.Count) { $licences | Export-Csv -Path "$out/licences.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/licences.csv" -ErrorAction SilentlyContinue }
 if ($tenants.Count) { $tenants | Export-Csv -Path "$out/tenants.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/tenants.csv" -ErrorAction SilentlyContinue }
 if ($licusers.Count) { $licusers | Export-Csv -Path "$out/licusers.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/licusers.csv" -ErrorAction SilentlyContinue }
+if ($envcap.Count) { $envcap | Export-Csv -Path "$out/envcap.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/envcap.csv" -ErrorAction SilentlyContinue }
 & "$PSScriptRoot/build-dashboard.ps1" -HelpdeskAt $helpdeskAt
 $failures | ForEach-Object { Write-Warning $_ }
 # Fail the job (GitHub emails the repo owner) only when nothing at all was collected: the collector itself is broken.

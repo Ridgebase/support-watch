@@ -275,9 +275,14 @@ function render() {
   const skuName = s => SKU[s] || s;
   const free = r => +r.Bought >= 10000 || +r.Bought === 0, perApp = r => /PER_APP/.test(r.Sku);   // 0 bought: an expired plan Microsoft has not purged yet
   const renewIn = r => Math.ceil((new Date(r.Renewal) - Date.now()) / 864e5);
-  const unusedOf = r => free(r) || perApp(r) ? 0 : Math.max(0, +r.Bought - +r.Assigned);
+  // Per-app passes are "assigned" by allocating them to environments (envcap, from the admin API), never to users: that allocation is their Assigned column.
+  const envAll = (data.envcap || []).filter(e => !client || e.Client === client);
+  const assignedOf = r => perApp(r) ? sum(envAll.filter(e => e.Client === r.Client), 'AppPass') : +r.Assigned;
+  const unusedOf = r => free(r) ? 0 : Math.max(0, +r.Bought - assignedOf(r));
   // Suspended seats are yellow, not red: a lapsed older subscription next to the live one (TSMO's Business Standard) lingers for months and costs nothing.
-  const licCls = r => free(r) ? 'off' : +r.Assigned > +r.Bought || +r.Warning > 0 || r.Status !== 'Enabled' || (r.Renewal && renewIn(r) < 30) ? 'bad' : +r.Suspended > 0 || (unusedOf(r) >= 3 && unusedOf(r) / +r.Bought >= 0.2) ? 'warn' : 'ok';
+  // More passes allocated than bought is yellow too: Microsoft lets it happen (trial passes, timing) and the admin center is the place to sort it out.
+  const licCls = r => free(r) ? 'off' : (!perApp(r) && assignedOf(r) > +r.Bought) || +r.Warning > 0 || r.Status !== 'Enabled' || (r.Renewal && renewIn(r) < 30) ? 'bad' : +r.Suspended > 0 || assignedOf(r) > +r.Bought || (unusedOf(r) >= 3 && unusedOf(r) / +r.Bought >= 0.2) ? 'warn' : 'ok';
+  const gb = mb => mb >= 1024 ? (mb / 1024).toFixed(1).replace(/\.0$/, '') + ' GB' : mb + ' MB';
   const licAll = (data.licences || []).filter(r => !client || r.Client === client), luAll = (data.licusers || []).filter(u => !client || u.Client === client);
   const licRed = licAll.filter(r => licCls(r) === 'bad').length, licYellow = licAll.filter(r => licCls(r) === 'warn').length;
   document.querySelector('.tabs [data-tab="lic"]').innerHTML = 'Licences' + (licRed + luAll.length ? `<span class="badge">${licRed + luAll.length}</span>` : '');
@@ -295,6 +300,7 @@ function render() {
       <div class="stat ${unused ? 'c-warn' : ''}"><a href="#plans" class="big">${unused}</a><small>Unused paid seats</small></div>
       <div class="stat ${luAll.length ? 'c-warn' : ''}"><a href="#licusers" class="big">${luAll.length}</a><small>Disabled accounts licensed</small></div>
       <div class="stat ${nextRen && renewIn(nextRen) < 30 ? 'c-bad' : ''}"><div class="big">${nextRen ? nextRen.Renewal.slice(0, 10) : '—'}</div><small>Next renewal${nextRen ? ': ' + esc(skuName(nextRen.Sku)) + (!client && Object.keys(latest).length > 1 ? ' (' + esc(nextRen.Client) + ')' : '') : ''}</small></div>
+      <div class="stat"><a href="#envs" class="big">${gb(sum(envAll, 'DbUsed') + sum(envAll, 'FileUsed') + sum(envAll, 'LogUsed'))}</a><small>Dataverse storage used</small></div>
     </div>`;
     const rank = { bad: 0, warn: 1, ok: 2, off: 3 };
     const lic = licAll.filter(r => (!hideFree || !free(r)) && (!only || ['bad', 'warn'].includes(licCls(r)))).sort((a, b) => rank[licCls(a)] - rank[licCls(b)] || a.Client.localeCompare(b.Client) || +b.Bought - +a.Bought);
@@ -304,8 +310,16 @@ function render() {
       h += `<h2 id="plans">Plans <span class="muted">(${lic.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Plan</th><th class="num">Bought</th><th class="num">Assigned</th><th class="num">Available</th><th>Renewal</th><th>Status</th></tr></thead><tbody>`;
       for (const r of lic) {
         const st = [r.Status === 'Enabled' ? 'Active' : r.Status, +r.Warning ? `${r.Warning} in grace` : '', +r.Suspended ? `${r.Suspended} suspended` : '', String(r.Trial) === 'True' ? 'trial' : ''].filter(Boolean).join(' · ');
-        h += `<tr class="${licCls(r)}"><td>${esc(r.Client)}</td><td class="flow" title="${esc(r.Sku)}">${esc(skuName(r.Sku))}${perApp(r) ? ' <span class="muted">(passes allocated to environments)</span>' : ''}</td><td class="num">${free(r) ? '—' : r.Bought}</td><td class="num">${r.Assigned}</td><td class="num ${unusedOf(r) >= 3 ? 'c-warn' : ''}">${free(r) || perApp(r) ? '—' : +r.Bought - +r.Assigned}</td><td class="date ${r.Renewal && renewIn(r) < 30 ? 'c-bad' : ''}">${r.Renewal ? r.Renewal.slice(0, 10) + ` (${renewIn(r)} d)` : '—'}</td><td class="${licCls(r) === 'bad' ? 'c-bad' : ''}">${esc(st)}</td></tr>`;
+        h += `<tr class="${licCls(r)}"><td>${esc(r.Client)}</td><td class="flow" title="${esc(r.Sku)}">${esc(skuName(r.Sku))}${perApp(r) ? ' <span class="muted">(passes allocated to environments, see below)</span>' : ''}</td><td class="num">${free(r) ? '—' : r.Bought}</td><td class="num">${assignedOf(r)}</td><td class="num ${unusedOf(r) >= 3 ? 'c-warn' : ''}">${free(r) ? '—' : +r.Bought - assignedOf(r)}</td><td class="date ${r.Renewal && renewIn(r) < 30 ? 'c-bad' : ''}">${r.Renewal ? r.Renewal.slice(0, 10) + ` (${renewIn(r)} d)` : '—'}</td><td class="${licCls(r) === 'bad' ? 'c-bad' : ''}">${esc(st)}</td></tr>`;
       }
+      h += '</tbody></table></div>';
+    }
+    // Environments: Dataverse storage used (the tenant's entitlement is not readable through the API, so no colour: compare with the admin center's
+    // Capacity page, 10 GB base plus what the licences add) and the add-ons allocated to each environment. Not filtered by "Problems only".
+    const envs = envAll.slice().sort((a, b) => a.Client.localeCompare(b.Client) || b.DbUsed - a.DbUsed);
+    if (envs.length) {
+      h += `<h2 id="envs">Environments <span class="muted">(${envs.length}, Dataverse storage used and add-ons allocated)</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Type</th><th class="num">Database</th><th class="num">File</th><th class="num">Log</th><th class="num">Per-app passes</th><th class="num">Per-flow plans</th><th>Other add-ons</th></tr></thead><tbody>`;
+      for (const e of envs) h += `<tr><td>${esc(e.Client)}</td><td class="flow">${esc(e.Environment)}</td><td>${esc(e.Type)}</td><td class="num">${gb(+e.DbUsed)}</td><td class="num">${gb(+e.FileUsed)}</td><td class="num">${gb(+e.LogUsed)}</td><td class="num">${+e.AppPass || '—'}</td><td class="num">${+e.PerFlow || '—'}</td><td class="flow">${esc(e.Addons || '—')}</td></tr>`;
       h += '</tbody></table></div>';
     }
     if (luAll.length) {
