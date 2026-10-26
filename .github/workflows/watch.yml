@@ -52,6 +52,15 @@ jobs:
           # Credentials with a fixed expiry, dates only ("label=YYYY-MM-DD; label=..."): shown under the page title, mailed 14 days ahead and once expired.
           # After renewing one, store the new secret and put the new date here. Refresh tokens roll over with use and have no date.
           EXPIRIES:     'cron-job.org token (GitHub dispatches, fine-grained)=2027-09-30'
+          # Tech watch tab: public RSS/Atom feeds, one per line "Label | URL | optional regex on the item's title and categories". General
+          # (not per client). The M365 roadmap lists every Microsoft product, so its regex keeps the ones we support; blogs are taken whole.
+          WATCH_FEEDS: |
+            Power Automate blog | https://www.microsoft.com/en-us/power-platform/blog/power-automate/feed/
+            Power Apps blog | https://www.microsoft.com/en-us/power-platform/blog/power-apps/feed/
+            Power BI blog | https://powerbi.microsoft.com/en-us/blog/feed/
+            Microsoft 365 blog | https://techcommunity.microsoft.com/t5/s/gxcuf89792/rss/board?board.id=microsoft_365blog
+            Microsoft Entra blog | https://techcommunity.microsoft.com/t5/s/gxcuf89792/rss/board?board.id=microsoft-entra-blog
+            Microsoft 365 roadmap | https://www.microsoft.com/releasecommunications/api/v2/m365/rss | Power (Apps|Automate|Platform|BI|Pages)|Copilot Studio|Dataverse|SharePoint|Microsoft 365 admin center|Microsoft Entra
         run: ./scripts/collect.ps1
 
       # Azure Static Web Apps (free tier): the site requires a Microsoft sign-in and the invited "reader" role (scripts/staticwebapp.config.json).

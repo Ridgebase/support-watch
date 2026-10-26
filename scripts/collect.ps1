@@ -11,6 +11,7 @@
 #                  Power Apps needs no option: every listed environment's canvas apps and connections go to powerapps.csv and
 #                  connections.csv (same refresh token exchanged for a Power Apps API token, Graph for the owners' account state)
 #   ODOO_URL, ODOO_USER, ODOO_KEY  optional: the Odoo Helpdesk tickets in progress go to tickets.csv (see the Helpdesk block)
+#   WATCH_FEEDS    optional: public RSS/Atom feeds for the Tech watch tab, one per line "Label | URL | optional regex" (see the Tech watch block)
 #   RT_<NAME>      the client's refresh token (from get-refresh-token.ps1), e.g. RT_SEMO
 #   NETLIFY_TOKEN  used by build-dashboard.ps1
 param([int]$Days = 7, [int]$Parallel = 8)
@@ -271,6 +272,43 @@ if ($env:ODOO_URL -and $env:ODOO_KEY) {
         Write-Host "Helpdesk: $($tickets.Count) ticket(s) in progress"
     } catch { $failures += "Helpdesk collection failed: $(& $why $_.Exception)" }
 }
+
+# Tech watch: a general (not per client) feed of Microsoft product news for the page's Tech watch tab. WATCH_FEEDS (plain env in watch.yml,
+# cloud job only: the SEMO function has no such setting) lists public RSS 2.0 or Atom feeds, one per line, "Label | URL | optional regex":
+# an item is kept when its title or categories match the regex (the M365 roadmap feed lists every product, the regex keeps ours).
+# Newest 25 items per feed from the last 45 days, summaries cut at 300 characters, so the page grows by a few tens of KB at most.
+# A feed that fails is a warning: the others still show, and the tab says when the feeds were last read.
+$news = [System.Collections.Generic.List[object]]::new(); $newsAt = ''
+if ($env:WATCH_FEEDS) {
+    $newsSince = [datetime]::UtcNow.AddDays(-45)
+    $text = { param($s) if ($s -is [System.Xml.XmlNode]) { $s = $s.InnerText }   # a CDATA or typed element (blog descriptions, Atom titles) comes as a node, not a string
+        [System.Net.WebUtility]::HtmlDecode(([regex]::Replace("$s", '<[^>]+>', ' ') -replace '\s+', ' ')).Trim() }   # HTML -> one line of plain text
+    foreach ($line in "$env:WATCH_FEEDS" -split "`n") {
+        $p = $line.Split('|', 3) | ForEach-Object Trim; if ($p.Count -lt 2 -or -not $p[1]) { continue }
+        $label, $url, $filter = $p[0], $p[1], "$($p[2])"
+        try {
+            # A browser User-Agent: microsoft.com answers 403 to the default one. Loaded from the bytes: the roadmap feed starts with a BOM, which [xml] on a string refuses.
+            $x = [xml]::new(); $x.Load([IO.MemoryStream]::new((Invoke-WebRequest -Uri $url -UserAgent 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36' -TimeoutSec 60 -UseBasicParsing).RawContentStream.ToArray()))
+            $items = @(if ($x.rss) { $x.rss.channel.item } else { $x.feed.entry })   # RSS 2.0 or Atom
+            $n = 0
+            foreach ($i in $items) {
+                $when = "$(if ($x.rss) { $i.pubDate } else { $i.published })"; if (-not $when) { $when = "$($i.updated)" }
+                $d = [datetimeoffset]::Parse($when.Replace(' Z', ' +0000'), [cultureinfo]::InvariantCulture).UtcDateTime   # "Fri, 23 Oct 2026 23:10:38 Z" (roadmap), "+0000", "GMT", or Atom's ISO
+                if ($d -lt $newsSince) { continue }
+                # ponytail: the roadmap tags every item with its clouds and platforms; those are dropped, the status and product tags stay. Extend the list if another feed is as noisy.
+                $tags = @($i.category | ForEach-Object { if ($_ -is [string]) { $_ } else { "$($_.term)$($_.'#text')" } } | Where-Object { $_ -notmatch '^(GCC|DoD|Web|Desktop|Mac|iOS|Android|Worldwide|General Availability|Preview|Targeted Release|Current Channel|Developer|Education)' }) -join ', '
+                $title = & $text $i.title
+                if ($filter -and "$title $tags" -notmatch $filter) { continue }
+                $link = "$(if ($i.link -is [string]) { $i.link } else { @($i.link)[0].href })"
+                $sum = & $text $(if ($i.description) { $i.description } else { $i.summary }); if ($sum.Length -gt 300) { $sum = $sum.Substring(0, 297) + '...' }
+                $news.Add([pscustomobject]@{ Source = $label; Date = [TimeZoneInfo]::ConvertTimeFromUtc($d, $tz).ToString('s'); Title = $title; Url = $link; Summary = $sum; Tags = $tags })
+                if (++$n -ge 25) { break }
+            }
+            Write-Host "Tech watch: $label, $n item(s)"
+        } catch { $failures += "Tech watch: $label failed: $($_.Exception.Message.Substring(0, [math]::Min(200, $_.Exception.Message.Length)))" }   # cut: a parse error quotes the whole feed
+    }
+    $newsAt = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s')
+}
 # Carry-over: a client that could not be signed in from here is taken from CARRY_URL, a data.json that the laptop
 # collector (flow-runs.ps1) publishes to a gist whenever it runs. Its snapshot time is kept, so the page shows STALE
 # for that client once the laptop has been off for an hour, instead of the client vanishing.
@@ -298,7 +336,8 @@ if ($pbiRuns.Count) { $pbiRuns | Export-Csv -Path "$out/powerbi-runs.csv" -NoTyp
 if ($apps.Count) { $apps | Export-Csv -Path "$out/powerapps.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/powerapps.csv" -ErrorAction SilentlyContinue }
 if ($conns.Count) { $conns | Export-Csv -Path "$out/connections.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/connections.csv" -ErrorAction SilentlyContinue }
 if ($tickets.Count) { $tickets | Export-Csv -Path "$out/tickets.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/tickets.csv" -ErrorAction SilentlyContinue }
-& "$PSScriptRoot/build-dashboard.ps1" -HelpdeskAt $helpdeskAt
+if ($news.Count) { $news | Export-Csv -Path "$out/news.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/news.csv" -ErrorAction SilentlyContinue }
+& "$PSScriptRoot/build-dashboard.ps1" -HelpdeskAt $helpdeskAt -NewsAt $newsAt
 $failures | ForEach-Object { Write-Warning $_ }
 # Fail the job (GitHub emails the repo owner) only when nothing at all was collected: the collector itself is broken.
 if ($blocked.Count -eq @($clients).Count) { exit 1 }

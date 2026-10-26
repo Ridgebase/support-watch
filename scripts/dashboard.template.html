@@ -34,8 +34,9 @@
   .controls label[data-for] { display:none; }   /* the second switch depends on the tab */
   body[data-tab="pa"] .controls label[data-for="pa"], body[data-tab="bi"] .controls label[data-for="bi"], body[data-tab="apps"] .controls label[data-for="apps"] { display:inline-flex; }
   td.text { white-space:normal; min-width:160px; max-width:560px; }   /* error messages and connector lists wrap too */
-  body[data-tab="apps"] th, body[data-tab="apps"] td, body[data-tab="help"] th, body[data-tab="help"] td { white-space:normal; }
-  body[data-tab="apps"] td.date, body[data-tab="help"] td.date { white-space:nowrap; }   /* a date split over two lines reads badly */   /* every cell may wrap: the tables then always fit the page width, no sideways scroll */
+  body[data-tab="apps"] th, body[data-tab="apps"] td, body[data-tab="help"] th, body[data-tab="help"] td, body[data-tab="news"] th, body[data-tab="news"] td { white-space:normal; }
+  body[data-tab="apps"] td.date, body[data-tab="help"] td.date, body[data-tab="news"] td.date { white-space:nowrap; }
+  td.news a { color:inherit; font-weight:600; text-decoration:none; } td.news a:hover { color:var(--accent); text-decoration:underline; } td.news small { display:block; color:var(--muted); margin-top:2px; }   /* Tech watch: public Microsoft pages, so real links (the no-link rule is for client resources) */   /* a date split over two lines reads badly */   /* every cell may wrap: the tables then always fit the page width, no sideways scroll */
   select { appearance:none; -webkit-appearance:none; font:inherit; color:var(--fg); background:var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' fill='none' stroke='%2376706a' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 10px center / 12px; border:1px solid var(--line); border-radius:6px; padding:6px 30px 6px 10px; min-width:160px; cursor:pointer; }
   select:hover { border-color:var(--muted); }
   select:focus { outline:2px solid var(--accent); outline-offset:1px; }
@@ -98,7 +99,7 @@
   <label data-for="pa"><span class="switch"><input type="checkbox" id="hidequiet" checked><span></span></span>Hide flows with 0 runs</label>
   <label data-for="bi"><span class="switch"><input type="checkbox" id="hidedisabled" checked><span></span></span>Hide disabled and stale models</label>
 </div>
-<div class="tabs" role="tablist"><button class="active" data-tab="pa" role="tab">Power Automate</button><button data-tab="bi" role="tab">Power BI</button><button data-tab="apps" role="tab">Power Apps</button><button data-tab="help" role="tab">Helpdesk</button></div>
+<div class="tabs" role="tablist"><button class="active" data-tab="pa" role="tab">Power Automate</button><button data-tab="bi" role="tab">Power BI</button><button data-tab="apps" role="tab">Power Apps</button><button data-tab="help" role="tab">Helpdesk</button><button data-tab="news" role="tab">Tech watch</button></div>
 <div id="out"></div>
 <script>
 // Pre-aggregated by build-dashboard.ps1: { snapshots: {client: collectedAt}, flows: [per flow], days: [per client per day], fails: [failed runs] }
@@ -130,7 +131,7 @@ const sel = document.getElementById('client');
 // Clients, then the helpdesk customers that matched no client (see collect.ps1): picking one filters the Helpdesk tab by customer.
 const unmapped = [...new Set((data.tickets || []).filter(t => !t.Client).map(t => t.Customer).filter(Boolean))].sort();
 for (const c of [...Object.keys(latest).sort(), ...unmapped]) sel.append(new Option(c, c));
-const snaps = [...Object.entries(latest), ...(data.helpdesk ? [['Helpdesk', data.helpdesk]] : [])];
+const snaps = [...Object.entries(latest), ...(data.helpdesk ? [['Helpdesk', data.helpdesk]] : []), ...(data.newsAt ? [['Tech watch', data.newsAt]] : [])];
 // "Last update: SEMO 14:03 · TSMO 14:05 · Helpdesk 14:03": the time alone when it is today's, the date too otherwise.
 // STALE = the scheduled task has not run for an hour: the page is old, not the flows.
 const hm = iso => iso.slice(0, 10) === localDate(new Date()) ? iso.slice(11, 16) : fmt(iso);
@@ -291,6 +292,22 @@ function render() {
     return;
   }
 
+  // Tech watch: general Microsoft product news (WATCH_FEEDS in watch.yml), newest first, whatever client or switch is selected (neither
+  // applies). An item under a week old has a bold date, so the Monday glance sees what is new since the last one.
+  if (tab === 'news') {
+    const items = (data.news || []).slice().sort((a, b) => b.Date.localeCompare(a.Date));
+    const sources = [...new Set((data.news || []).map(n => n.Source))].sort();
+    if (!data.newsAt) h += '<p class="muted">Tech watch not collected in the last update (WATCH_FEEDS unset or every feed failed; see the job log).</p>';
+    else if (!items.length) h += '<p class="muted">Nothing to show.</p>';
+    else {
+      h += `<h2 id="news">Tech watch <span class="muted">(${items.length} items, last 45 days, from ${sources.map(esc).join(', ')})</span></h2><div class="card wrap"><table><thead><tr><th>Date</th><th>Source</th><th>What's new</th></tr></thead><tbody>`;
+      for (const n of items) h += `<tr><td class="date ${Date.now() - new Date(n.Date) < 7 * 864e5 ? '' : 'muted'}" style="${Date.now() - new Date(n.Date) < 7 * 864e5 ? 'font-weight:600' : ''}">${n.Date.slice(0, 10)}</td><td>${esc(n.Source)}</td><td class="news"><a href="${esc(n.Url)}" target="_blank" rel="noopener">${esc(n.Title)}</a><small>${esc(n.Summary)}${n.Tags ? ' <i>' + esc(n.Tags) + '</i>' : ''}</small></td></tr>`;
+      h += '</tbody></table></div>';
+    }
+    document.getElementById('out').innerHTML = h;
+    return;
+  }
+
   // Power Automate tab. A selected customer with no flow at all (a helpdesk-only customer) gets the Power BI tab's kind of empty message, not a Waiting card.
   if (client && !summary.some(f => f.client === client)) { document.getElementById('out').innerHTML = '<p class="muted">No Power Automate flow to show.</p>'; return; }
   h += health(client);  const rank = { bad: 0, stuck: 1, silent: 2, warn: 3, ok: 4, '': 5, off: 6 };
@@ -333,8 +350,8 @@ document.getElementById('out').addEventListener('click', e => {
   const b = e.target.closest('button.copy'); if (!b) return;
   navigator.clipboard.writeText(b.dataset.url).then(() => { b.textContent = '✓'; setTimeout(() => b.innerHTML = COPY_SVG, 1200); });
 });
-// Tabs: pa (default, no hash), bi (#bi), apps (#apps), help (#help).
-let tab = ['bi', 'apps', 'help'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'pa';
+// Tabs: pa (default, no hash), bi (#bi), apps (#apps), help (#help), news (#news).
+let tab = ['bi', 'apps', 'help', 'news'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'pa';
 const tabHash = () => tab === 'pa' ? '' : '#' + tab;
 document.querySelector('.tabs').addEventListener('click', e => {
   const b = e.target.closest('button[data-tab]'); if (!b) return;
