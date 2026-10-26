@@ -48,9 +48,10 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   accounts that still hold a paid licence. Red (and the tab's badge): more seats assigned than bought, seats in grace, a plan not enabled, a renewal
   within 30 days; yellow: suspended seats, or a fifth of a paid plan's seats unassigned. Free, trial and expired plans are hidden by a switch.
   Plan names are a hand-kept map in the template (`SKU`); an unknown code shows as is. Below the plans, every environment of the tenant
-  (`out/envcap.csv`, admin API) with its Dataverse database, file and log storage used (the tenant's entitlement is not readable through the
-  API, so no colour) and the add-ons allocated to it: per-app passes are assigned to environments, never to users, so that allocation is what
-  the per-app plan row shows as assigned.
+  (`out/envcap.csv`, admin API) with its Dataverse database, file and log storage used and the add-ons allocated to it: per-app passes are
+  assigned to environments, never to users, so that allocation is what the per-app plan row shows as assigned. Above it, the tenant's Dataverse
+  capacity as the admin center's Capacity page shows it (`tenants.csv`, Power Platform API `licensing/tenantCapacity`): used against entitled
+  per storage type, red at 100% or when Microsoft reports the capacity exceeded, yellow from 80%.
 - The **Tech watch** tab has two sections. Top, **service changes**: each client's Microsoft 365 Message Center (Graph, the place Microsoft
   announces retirements, licensing and policy changes with the services affected and an action date), messages of the last 60 days that are
   more than "Stay informed" and that match `WATCH_SERVICES` (plain env in `watch.yml`, a regex on the services and title: Power Platform,

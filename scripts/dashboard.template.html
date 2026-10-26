@@ -284,14 +284,20 @@ function render() {
   const licCls = r => free(r) ? 'off' : (!perApp(r) && assignedOf(r) > +r.Bought) || +r.Warning > 0 || r.Status !== 'Enabled' || (r.Renewal && renewIn(r) < 30) ? 'bad' : +r.Suspended > 0 || assignedOf(r) > +r.Bought || (unusedOf(r) >= 3 && unusedOf(r) / +r.Bought >= 0.2) ? 'warn' : 'ok';
   const gb = mb => mb >= 1024 ? (mb / 1024).toFixed(1).replace(/\.0$/, '') + ' GB' : mb + ' MB';
   const licAll = (data.licences || []).filter(r => !client || r.Client === client), luAll = (data.licusers || []).filter(u => !client || u.Client === client);
-  const licRed = licAll.filter(r => licCls(r) === 'bad').length, licYellow = licAll.filter(r => licCls(r) === 'warn').length;
+  // Tenant capacity (tenants rows): red when a storage type is at its entitlement or the admin center says so (Microsoft then blocks environment
+  // operations), yellow from 80%. Database is the one that costs: file is cheap, log small.
+  const tn = (data.tenants || []).filter(t => !client || t.Client === client);
+  const pctOf = (t, k) => +t[k + 'Total'] > 0 ? +t[k + 'Used'] / +t[k + 'Total'] : 0;
+  const capCls = t => (t.CapStatus && t.CapStatus !== 'Available') || ['Db', 'File', 'Log'].some(k => pctOf(t, k) >= 1) ? 'bad' : ['Db', 'File', 'Log'].some(k => pctOf(t, k) >= 0.8) ? 'warn' : '';
+  const capCell = (t, k) => +t[k + 'Total'] > 0 ? `${gb(+t[k + 'Used'])} / ${gb(+t[k + 'Total'])} <span class="${pctOf(t, k) >= 1 ? 'c-bad' : pctOf(t, k) >= 0.8 ? 'c-warn' : 'muted'}">(${Math.round(100 * pctOf(t, k))}%)</span>` : '—';
+  const licRed = licAll.filter(r => licCls(r) === 'bad').length + tn.filter(t => capCls(t) === 'bad').length, licYellow = licAll.filter(r => licCls(r) === 'warn').length;
   document.querySelector('.tabs [data-tab="lic"]').innerHTML = 'Licences' + (licRed + luAll.length ? `<span class="badge">${licRed + luAll.length}</span>` : '');
   if (tab === 'lic') {
     const hideFree = document.getElementById('hidefree').checked;
-    const tn = (data.tenants || []).filter(t => !client || t.Client === client), paid = licAll.filter(r => !free(r));
+    const paid = licAll.filter(r => !free(r)), capRed = tn.filter(t => capCls(t) === 'bad').length;
     const unused = paid.reduce((n, r) => n + unusedOf(r), 0), nextRen = paid.filter(r => r.Renewal).sort((a, b) => a.Renewal.localeCompare(b.Renewal))[0];
     const stale = Object.keys(latest).filter(c => !client || c === client).some(c => Date.now() - new Date(latest[c]) > STALE_MS);
-    const [label, tone] = !licAll.length ? ['Not collected', 'grey'] : stale ? ['Stale data', 'grey'] : licRed ? [`${licRed} plan${licRed > 1 ? 's' : ''} needing attention`, 'bad']
+    const [label, tone] = !licAll.length ? ['Not collected', 'grey'] : stale ? ['Stale data', 'grey'] : capRed ? ['Dataverse capacity exceeded', 'bad'] : licRed ? [`${licRed} plan${licRed > 1 ? 's' : ''} needing attention`, 'bad']
       : luAll.length ? [`${luAll.length} disabled account${luAll.length > 1 ? 's' : ''} licensed`, 'warn'] : licYellow ? [`${licYellow} plan${licYellow > 1 ? 's' : ''} with unused seats`, 'warn'] : ['Licences OK', 'ok'];
     h += `<div class="card health">
       <div class="status"><span class="dot" style="background:var(--${tone})"></span><b class="c-${tone}">${label}</b></div>
@@ -300,7 +306,7 @@ function render() {
       <div class="stat ${unused ? 'c-warn' : ''}"><a href="#plans" class="big">${unused}</a><small>Unused paid seats</small></div>
       <div class="stat ${luAll.length ? 'c-warn' : ''}"><a href="#licusers" class="big">${luAll.length}</a><small>Disabled accounts licensed</small></div>
       <div class="stat ${nextRen && renewIn(nextRen) < 30 ? 'c-bad' : ''}"><div class="big">${nextRen ? nextRen.Renewal.slice(0, 10) : '—'}</div><small>Next renewal${nextRen ? ': ' + esc(skuName(nextRen.Sku)) + (!client && Object.keys(latest).length > 1 ? ' (' + esc(nextRen.Client) + ')' : '') : ''}</small></div>
-      <div class="stat"><a href="#envs" class="big">${gb(sum(envAll, 'DbUsed') + sum(envAll, 'FileUsed') + sum(envAll, 'LogUsed'))}</a><small>Dataverse storage used</small></div>
+      <div class="stat ${Math.max(0, ...tn.map(t => pctOf(t, 'Db'))) >= 1 ? 'c-bad' : Math.max(0, ...tn.map(t => pctOf(t, 'Db'))) >= 0.8 ? 'c-warn' : ''}"><a href="#capacity" class="big">${sum(tn, 'DbTotal') ? gb(sum(tn, 'DbUsed')) + ' / ' + gb(sum(tn, 'DbTotal')) : '—'}</a><small>Dataverse database used / entitled</small></div>
     </div>`;
     const rank = { bad: 0, warn: 1, ok: 2, off: 3 };
     const lic = licAll.filter(r => (!hideFree || !free(r)) && (!only || ['bad', 'warn'].includes(licCls(r)))).sort((a, b) => rank[licCls(a)] - rank[licCls(b)] || a.Client.localeCompare(b.Client) || +b.Bought - +a.Bought);
@@ -316,9 +322,15 @@ function render() {
     }
     // Environments: Dataverse storage used (the tenant's entitlement is not readable through the API, so no colour: compare with the admin center's
     // Capacity page, 10 GB base plus what the licences add) and the add-ons allocated to each environment. Not filtered by "Problems only".
+    const caps = tn.filter(t => +t.DbTotal > 0).sort((a, b) => a.Client.localeCompare(b.Client));
+    if (caps.length) {
+      h += `<h2 id="capacity">Dataverse capacity <span class="muted">(tenant entitlement: 10 GB base plus what each licence adds)</span></h2><div class="card wrap" style="margin-bottom:20px"><table><thead><tr><th>Client</th><th>Database</th><th>File</th><th>Log</th><th>Status</th></tr></thead><tbody>`;
+      for (const t of caps) h += `<tr class="${capCls(t)}"><td>${esc(t.Client)}</td><td>${capCell(t, 'Db')}</td><td>${capCell(t, 'File')}</td><td>${capCell(t, 'Log')}</td><td class="${t.CapStatus !== 'Available' ? 'c-bad' : ''}">${esc(t.CapStatus || '—')}</td></tr>`;
+      h += '</tbody></table></div>';
+    }
     const envs = envAll.slice().sort((a, b) => a.Client.localeCompare(b.Client) || b.DbUsed - a.DbUsed);
     if (envs.length) {
-      h += `<h2 id="envs">Environments <span class="muted">(${envs.length}, Dataverse storage used and add-ons allocated)</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Type</th><th class="num">Database</th><th class="num">File</th><th class="num">Log</th><th class="num">Per-app passes</th><th class="num">Per-flow plans</th><th>Other add-ons</th></tr></thead><tbody>`;
+      h += `<h2 id="envs">Environments <span class="muted">(${envs.length}, storage used and add-ons allocated)</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Type</th><th class="num">Database</th><th class="num">File</th><th class="num">Log</th><th class="num">Per-app passes</th><th class="num">Per-flow plans</th><th>Other add-ons</th></tr></thead><tbody>`;
       for (const e of envs) h += `<tr><td>${esc(e.Client)}</td><td class="flow">${esc(e.Environment)}</td><td>${esc(e.Type)}</td><td class="num">${gb(+e.DbUsed)}</td><td class="num">${gb(+e.FileUsed)}</td><td class="num">${gb(+e.LogUsed)}</td><td class="num">${+e.AppPass || '—'}</td><td class="num">${+e.PerFlow || '—'}</td><td class="flow">${esc(e.Addons || '—')}</td></tr>`;
       h += '</tbody></table></div>';
     }

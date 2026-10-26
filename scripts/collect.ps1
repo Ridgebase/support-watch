@@ -330,7 +330,8 @@ foreach ($c in $clients) {
 
 # Licences: per client, from Graph with the Flow refresh token (no extra consent: subscribedSkus, directory/subscriptions and users read with the
 # signed-in account's directory access). licences.csv = one row per SKU: seats bought (prepaid, enabled), assigned, in grace (warning), suspended,
-# and the next renewal among its enabled subscriptions; tenants.csv = one row per client with the user counts; licusers.csv = disabled accounts
+# and the next renewal among its enabled subscriptions; tenants.csv = one row per client with the user counts and the tenant's Dataverse capacity
+# (used and entitled, database, file and log); licusers.csv = disabled accounts
 # that still hold a paid licence (seats paid for nobody). A free, trial or developer plan has 10 000 seats or more: kept, muted on the page.
 $licences = [System.Collections.Generic.List[object]]::new(); $tenants = [System.Collections.Generic.List[object]]::new(); $licusers = [System.Collections.Generic.List[object]]::new()
 foreach ($c in $clients) {
@@ -356,7 +357,17 @@ foreach ($c in $clients) {
             }
             $url = $r.'@odata.nextLink'
         }
-        $tenants.Add([pscustomobject]@{ Client = $c.Name; Users = [int]$enabled; Disabled = [int]$disabled })
+        # Tenant Dataverse capacity, what the admin center's Capacity page shows: entitlement (base + what each licence adds) and use, per storage type.
+        # Through the Power Platform API (api.powerplatform.com), the only audience that answers; the Power Apps and Graph tokens get 401.
+        $tcap = @{}; $capStatus = ''
+        try {
+            $pt = (Invoke-RestMethod -Method Post -Uri "https://login.microsoftonline.com/$($c.Tenant)/oauth2/v2.0/token" -Body @{ grant_type = 'refresh_token'; client_id = $clientId; refresh_token = [Environment]::GetEnvironmentVariable("RT_$($c.Name)"); scope = 'https://api.powerplatform.com/.default offline_access' }).access_token
+            $tc = Invoke-RestMethod -Uri 'https://api.powerplatform.com/licensing/tenantCapacity?api-version=2022-03-01-preview' -Headers @{ Authorization = "Bearer $pt" } -TimeoutSec 60
+            foreach ($x in $tc.tenantCapacities) { $tcap["$($x.capacityType)"] = $x }; $capStatus = "$($tc.capacitySummary.status)"
+        } catch { $failures += "$($c.Name): tenant capacity failed: $(& $why $_.Exception)" }
+        $cmb = { param($t, $f) [math]::Round([double]$(if ($f -eq 'total') { $tcap[$t].totalCapacity } else { $tcap[$t].consumption.actual })) }   # MB
+        $tenants.Add([pscustomobject]@{ Client = $c.Name; Users = [int]$enabled; Disabled = [int]$disabled; CapStatus = $capStatus
+            DbUsed = (& $cmb Database actual); DbTotal = (& $cmb Database total); FileUsed = (& $cmb File actual); FileTotal = (& $cmb File total); LogUsed = (& $cmb Log actual); LogTotal = (& $cmb Log total) })
         Write-Host "$($c.Name): licences, $($skuName.Count) SKU(s), $enabled enabled users, $disabled disabled"
     } catch { $failures += "$($c.Name): licence collection failed: $(& $why $_.Exception)" }
 }
