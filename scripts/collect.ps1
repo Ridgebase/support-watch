@@ -288,7 +288,7 @@ $text = { param($s) if ($s -is [System.Xml.XmlNode]) { $s = $s.InnerText }   # a
 $local = { param($v) if (-not $v) { '' } else { $d = if ($v -is [datetime]) { $v.ToUniversalTime() } else { [datetime]::Parse("$v", [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
     [TimeZoneInfo]::ConvertTimeFromUtc($d, $tz).ToString('s') } }   # Invoke-RestMethod on PowerShell 7 already turns ISO dates into [datetime]; $toLocal expects strings
 $changes = [System.Collections.Generic.List[object]]::new()
-$svc = if ($env:WATCH_SERVICES) { $env:WATCH_SERVICES } else { 'Power (Platform|Apps|Automate|BI|Pages)|Copilot Studio|Dataverse|Dynamics|Entra|licen[cs]|pricing|subscription' }   # the default also serves the function, which has no such setting; "Power " alone catches PowerPoint and PowerShell
+$svc = if ($env:WATCH_SERVICES) { $env:WATCH_SERVICES } else { 'Power (Platform|Apps|Automate|BI|Pages)|Copilot Studio|Dataverse|Dynamics|Entra|licen[cs]|pricing|billing|subscription' }   # the default also serves the function, which has no such setting; "Power " alone catches PowerPoint and PowerShell
 foreach ($c in $clients) {
     $mrt = [Environment]::GetEnvironmentVariable("MC_$($c.Name)")
     if (-not $mrt -or $c.Name -in @($env:CARRY_CLIENTS -split ',' | ForEach-Object Trim)) { continue }
