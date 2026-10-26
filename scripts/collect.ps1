@@ -279,13 +279,16 @@ if ($env:ODOO_URL -and $env:ODOO_KEY) {
 # announces retirements, licensing and policy changes, with the services affected and an action date. The Flow refresh token cannot read it (the
 # Azure CLI app is not pre-authorized for ServiceMessage.Read.All), hence MC_<NAME>, a second token made by get-refresh-token.ps1 -MessageCenter
 # with the Microsoft Graph PowerShell app; the signed-in account needs a role that reads the Message Center. Kept: messages changed in the last
-# 60 days that are more than "Stay informed" (a plan for change, a fix to apply, a major change, a retirement, an action date). One row per
-# client and message; the page merges the clients that share a message id. SEMO's rows come through the function and the carry-over like the rest.
+# 60 days that are more than "Stay informed" (a plan for change, a fix to apply, a major change, a retirement, an action date) and that concern
+# what we support: WATCH_SERVICES, a regex on the message's services and title (default below: Power Platform, Dataverse, Dynamics, Entra,
+# and anything about licensing or pricing); the rest is the tenant admin's Teams, Exchange and Office housekeeping. One row per client and message;
+# the page merges the clients that share a message id. SEMO's rows come through the function and the carry-over like the rest.
 $text = { param($s) if ($s -is [System.Xml.XmlNode]) { $s = $s.InnerText }   # a CDATA or typed element (blog descriptions, Atom titles) comes as a node, not a string
     [System.Net.WebUtility]::HtmlDecode(([regex]::Replace("$s", '<[^>]+>', ' ') -replace '\s+', ' ')).Trim() }   # HTML -> one line of plain text
 $local = { param($v) if (-not $v) { '' } else { $d = if ($v -is [datetime]) { $v.ToUniversalTime() } else { [datetime]::Parse("$v", [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
     [TimeZoneInfo]::ConvertTimeFromUtc($d, $tz).ToString('s') } }   # Invoke-RestMethod on PowerShell 7 already turns ISO dates into [datetime]; $toLocal expects strings
 $changes = [System.Collections.Generic.List[object]]::new()
+$svc = if ($env:WATCH_SERVICES) { $env:WATCH_SERVICES } else { 'Power (Platform|Apps|Automate|BI|Pages)|Copilot Studio|Dataverse|Dynamics|Entra|licen[cs]|pricing|subscription' }   # the default also serves the function, which has no such setting; "Power " alone catches PowerPoint and PowerShell
 foreach ($c in $clients) {
     $mrt = [Environment]::GetEnvironmentVariable("MC_$($c.Name)")
     if (-not $mrt -or $c.Name -in @($env:CARRY_CLIENTS -split ',' | ForEach-Object Trim)) { continue }
@@ -298,6 +301,7 @@ foreach ($c in $clients) {
                 $act = "$(& $local $m.actionRequiredByDateTime)"
                 if ($m.category -eq 'stayInformed' -and -not $m.isMajorChange -and -not $act -and @($m.tags) -notcontains 'Retirement') { continue }
                 $sum = & $text $m.body.content; if ($sum.Length -gt 300) { $sum = $sum.Substring(0, 297) + '...' }
+                if ("$(@($m.services) -join ', ') $($m.title)" -notmatch $svc) { continue }   # not the body: half the messages mention Entra or a subscription somewhere in it
                 $changes.Add([pscustomobject]@{ Client = $c.Name; Id = "$($m.id)"; Title = "$($m.title)"; Category = "$($m.category)"; Severity = "$($m.severity)"; Major = [bool]$m.isMajorChange
                     Tags = (@($m.tags) -join ', '); Services = (@($m.services) -join ', '); Start = (& $local $m.startDateTime); ActionBy = $act; Modified = (& $local $m.lastModifiedDateTime)
                     Summary = $sum; Url = "https://admin.microsoft.com/#/MessageCenter/:/messages/$($m.id)" }); $n++

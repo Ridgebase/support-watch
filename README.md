@@ -45,8 +45,10 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   company name (`seguinmorris.com` ~ `Séguin Morris Inc`); the others show under All clients only.
 - The **Tech watch** tab has two sections. Top, **service changes**: each client's Microsoft 365 Message Center (Graph, the place Microsoft
   announces retirements, licensing and policy changes with the services affected and an action date), messages of the last 60 days that are
-  more than "Stay informed", one row per message with the clients it was seen in; red with the tab's badge when an action is due within 14 days
-  or overdue, yellow for a major change or a retirement. It needs a second token per client, `MC_<NAME>`, made by
+  more than "Stay informed" and that match `WATCH_SERVICES` (plain env in `watch.yml`, a regex on the services and title: Power Platform,
+  Dataverse, Dynamics, Entra, licensing and pricing by default; Teams, Exchange and Office housekeeping is left to the tenant's admin), one row
+  per message with the clients it was seen in; red with the tab's badge when an action is due within 14 days or overdue by less than a month,
+  yellow for a major change or a retirement. It needs a second token per client, `MC_<NAME>`, made by
   `get-refresh-token.ps1 -Tenant <tenant> -Out <file> -MessageCenter` (the Flow token's app is not pre-authorized for that permission; the
   account needs a role that reads the Message Center, e.g. Global Reader or Message Center Reader) and stored like `RT_<NAME>` (GitHub secret;
   for SEMO the function's app setting, `flow-runs.ps1 -Login SEMO -MessageCenter` then `azure-function/set-secrets.ps1`). Bottom, **blog posts

@@ -294,11 +294,12 @@ function render() {
 
   // Tech watch. Top: service changes from each client's Microsoft 365 Message Center (retirements, licensing and policy changes, with the services
   // affected and an action date), one row per message with the clients it was seen in (the same MC id shows in every tenant). Red: action required
-  // within 14 days or overdue; yellow: a major change or a retirement. The tab's badge counts the red ones. "Problems only" keeps the rows with an
-  // action date. Bottom: blog posts and roadmap items (WATCH_FEEDS, read once a day), newest first, a bold date when under a week old.
+  // within 14 days, or overdue by less than a month (older ones are history Microsoft keeps editing); yellow: a major change or a retirement. The
+  // tab's badge counts the red ones. "Problems only" keeps the rows with an action date. Bottom: blog posts and roadmap items (WATCH_FEEDS, read
+  // once a day), newest first, a bold date when under a week old.
   const byId = {}; for (const c of (data.changes || []).filter(c => !client || c.Client === client)) { (byId[c.Id] ??= { ...c, clients: [] }).clients.push(c.Client); }
   const daysTo = c => Math.ceil((new Date(c.ActionBy) - Date.now()) / 864e5);
-  const chCls = c => c.ActionBy && daysTo(c) < 14 ? 'bad' : String(c.Major) === 'True' || /Retirement/.test(c.Tags) ? 'warn' : '';
+  const chCls = c => c.ActionBy && daysTo(c) < 14 && daysTo(c) > -30 ? 'bad' : String(c.Major) === 'True' || /Retirement/.test(c.Tags) ? 'warn' : '';
   const chBad = Object.values(byId).filter(c => chCls(c) === 'bad').length;
   document.querySelector('.tabs [data-tab="news"]').innerHTML = 'Tech watch' + (chBad ? `<span class="badge">${chBad}</span>` : '');
   if (tab === 'news') {

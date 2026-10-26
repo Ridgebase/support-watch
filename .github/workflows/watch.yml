@@ -45,6 +45,8 @@ jobs:
           CLIENTS_JSON: ${{ secrets.CLIENTS_JSON }}
           RT_TSMO:      ${{ secrets.RT_TSMO }}
           MC_TSMO:      ${{ secrets.MC_TSMO }}   # Message Center token (get-refresh-token.ps1 -MessageCenter): Tech watch tab, service changes
+          # Which Message Center messages to keep: a regex on the message's services and title. Same default inside collect.ps1 (the SEMO function has no setting).
+          WATCH_SERVICES: 'Power (Platform|Apps|Automate|BI|Pages)|Copilot Studio|Dataverse|Dynamics|Entra|licen[cs]|pricing|subscription'
           CARRY_URL:    ${{ secrets.CARRY_URL }}
           CARRY_CLIENTS: SEMO   # collected by the Azure function only (azure-function/), never from here
           ODOO_URL:     ${{ secrets.ODOO_URL }}    # Odoo Helpdesk: tickets in progress (Helpdesk tab)
