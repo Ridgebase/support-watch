@@ -84,12 +84,18 @@ foreach ($c in $clients) {
     Write-Host "$($c.Name): signed in, $($envs.Count) environment(s) found"   # progress marks: a run killed by the function's 10-min limit then shows where it stalled
 
     foreach ($env in $envs) {
-        $flows = @(Get-All "$api/environments/$($env['name'])/flows?$ver" $h)
+        # The user listing omits most solution flows, even ones this account created (SEMO, 2026-10-26: 59 of 265 listed, "RB - Estimation -
+        # Generate Excel forecast" among the missing): with an admin role the admin listing gives every flow of the environment. Stopped flows
+        # are skipped there (150 in SEMO, mostly Microsoft's managed solutions); without the role, the user listing as before, stopped ones included.
+        $flows = try { @(Get-All "$api/scopes/admin/environments/$($env['name'])/v2/flows?$ver" $h | Where-Object { $_['properties']['state'] -eq 'Started' }) }
+                 catch { @(Get-All "$api/environments/$($env['name'])/flows?$ver" $h) }
         Write-Host "$($c.Name): $($env['properties']['displayName']): $($flows.Count) flows listed, reading runs"
         # One runs request per flow, in parallel. Runs come newest first: stop paging once a page ends before the window.
         # The Flow API returns 503/504 timeouts now and then; without retries the flow lost all its runs for that build and showed UNREADABLE.
         $flowRows = $flows | ForEach-Object -ThrottleLimit $Parallel -Parallel {
             $flow = $_; $api = $using:api; $ver = $using:ver; $h = $using:h; $since = $using:since; $tz = $using:tz; $envId = ($using:env)['name']
+            # The admin listing carries no definitionSummary: the flow's own GET does (trigger type, for the silent-flow check).
+            if (-not $flow['properties']['definitionSummary']) { try { $flow = (Invoke-WebRequest -Uri "$api/environments/$envId/flows/$($flow['name'])?$ver" -Headers $h -MaximumRetryCount 2 -RetryIntervalSec 3 -TimeoutSec 30).Content | ConvertFrom-Json -AsHashtable } catch {} }
             $fd = ($using:c).FlowDays; $fdName = $flow['properties']['displayName']; if ($fd -and $fd.$fdName) { $since = ($using:nowUtc).AddDays(-$fd.$fdName) }
             $utc = { param($s) [datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
             $cap = { param($m) $m = "$m".Trim(': ') -replace '\s+', ' '; if ($m.Length -gt 4000) { $m.Substring(0, 4000) + '...' } else { $m } }   # the user wants the whole message; 4000 only guards the CSV and the page
@@ -106,7 +112,7 @@ foreach ($c in $clients) {
                     # field is collected, outermost first ("An error has occurred. - Valeur non valide pour le champ Numero ..."); stack traces are skipped.
                     # An HTML body (a gateway's 503 page) is kept as its text. Correlation and request ids are dropped so identical errors group on the page.
                     $msgs = [System.Collections.Generic.List[string]]::new()
-                    $idRx = '(?i)\s*(clientRequestId|CorrelationId)\s*:\s*[0-9a-f-]{8,}\.?'
+                    $idRx = '(?i)\s*(clientRequestId|serviceRequestId|CorrelationId)\s*:\s*[0-9a-f-]{8,}\.?'
                     $add = { param($v) $n = ($v -replace $idRx, '').Trim(); if (-not $n -or ($msgs | Where-Object { $_.Contains($n) })) { return }; foreach ($x in @($msgs | Where-Object { $n.Contains($_) })) { [void]$msgs.Remove($x) }; $msgs.Add($n) }   # ids off before comparing; a message already inside another is skipped
                     $walk = { param($h, $depth) if ($depth -gt 4) { return }; if ($h -is [hashtable]) { foreach ($k in $h.Keys) { $v = $h[$k]; if ($k -match '^(message|exceptionmessage|error_description|description|detail|details|reason)$' -and $v -is [string]) { & $add $v } elseif ($v -is [hashtable] -or $v -is [array]) { & $walk $v ($depth + 1) } } } elseif ($h -is [array]) { foreach ($x in $h) { & $walk $x ($depth + 1) } } }
                     $m = if ($b -is [hashtable] -or $b -is [array]) { & $walk $b 0; if ($msgs.Count) { $msgs -join ' - ' } else { $b | ConvertTo-Json -Compress -Depth 3 } } elseif ("$b".TrimStart() -notlike '<*') { "$b" } else { ("$b" -replace '(?is)<(script|style).*?</>', '' -replace '<[^>]+>', ' ' -replace '&nbsp;', ' ') }
