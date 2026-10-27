@@ -427,13 +427,13 @@ foreach ($c in $clients) {
 # cloud job only: the SEMO function has no such setting) lists public RSS 2.0 or Atom feeds, one per line, "Label | URL | optional regex":
 # an item is kept when its title or categories match the regex (the M365 roadmap feed lists every product, the regex keeps ours).
 # Newest 25 items per feed from the last 45 days, summaries cut at 300 characters, so the page grows by a few tens of KB at most.
-# Blogs change daily at most, so the feeds are read once a day (the roadmap feed alone is 2.6 MB) into state/news.csv, committed by the
+# Blogs change daily at most, so the feeds are read once a day, each morning (the roadmap feed alone is 2.6 MB) into state/news.csv, committed by the
 # workflow bot with the rest of state/ and read by build-dashboard.ps1 from there; ReadAt (Eastern, on every row) says when. A feed that
 # fails is a warning; a day when every feed fails keeps the previous file (the page then shows its older ReadAt).
 $newsCache = "$PSScriptRoot/../state/news.csv"
 $cached = @(if (Test-Path $newsCache) { Import-Csv $newsCache })
 $news = [System.Collections.Generic.List[object]]::new(); $readAt = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s')
-if ($env:WATCH_FEEDS -and -not ($cached.Count -and ([datetime]$readAt - [datetime]$cached[0].ReadAt).TotalHours -lt 24)) {
+if ($env:WATCH_FEEDS -and [int]$readAt.Substring(11, 2) -ge 6 -and -not ($cached.Count -and $cached[0].ReadAt.Substring(0, 10) -eq $readAt.Substring(0, 10))) {   # first run after 6 am Eastern, once a day
     $newsSince = [datetime]::UtcNow.AddDays(-45)
     foreach ($line in "$env:WATCH_FEEDS" -split "`n") {
         $p = $line.Split('|', 3) | ForEach-Object Trim; if ($p.Count -lt 2 -or -not $p[1]) { continue }
