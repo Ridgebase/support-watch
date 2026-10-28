@@ -100,7 +100,7 @@
   <label data-for="bi"><span class="switch"><input type="checkbox" id="hidedisabled" checked><span></span></span>Hide disabled and stale models</label>
   <label data-for="lic"><span class="switch"><input type="checkbox" id="hidefree" checked><span></span></span>Hide free, trial and expired plans</label>
 </div>
-<div class="tabs" role="tablist"><button class="active" data-tab="pa" role="tab">Power Automate</button><button data-tab="bi" role="tab">Power BI</button><button data-tab="apps" role="tab">Power Apps</button><button data-tab="lic" role="tab">Licences</button><button data-tab="help" role="tab">Helpdesk</button><button data-tab="news" role="tab">Tech watch</button></div>
+<div class="tabs" role="tablist"><button class="active" data-tab="pa" role="tab">Power Automate</button><button data-tab="bi" role="tab">Power BI</button><button data-tab="apps" role="tab">Power Apps</button><button data-tab="lic" role="tab">Licences</button><button data-tab="cap" role="tab">Capacity</button><button data-tab="help" role="tab">Helpdesk</button><button data-tab="news" role="tab">Tech watch</button></div>
 <div id="out"></div>
 <script>
 // Pre-aggregated by build-dashboard.ps1: { snapshots: {client: collectedAt}, flows: [per flow], days: [per client per day], fails: [failed runs] }
@@ -286,7 +286,7 @@ function render() {
   const unusedOf = r => free(r) ? 0 : Math.max(0, +r.Bought - assignedOf(r));
   // Suspended seats are yellow, not red: a lapsed older subscription next to the live one (TSMO's Business Standard) lingers for months and costs nothing.
   // More passes allocated than bought is yellow too: Microsoft lets it happen (trial passes, timing) and the admin center is the place to sort it out.
-  const licCls = r => free(r) ? 'off' : (!perApp(r) && assignedOf(r) > +r.Bought) || +r.Warning > 0 || r.Status !== 'Enabled' || (r.Renewal && renewIn(r) < 30) ? 'bad' : +r.Suspended > 0 || assignedOf(r) > +r.Bought || (unusedOf(r) >= 3 && unusedOf(r) / +r.Bought >= 0.2) ? 'warn' : 'ok';
+  const licCls = r => free(r) ? 'off' : (!perApp(r) && assignedOf(r) > +r.Bought) || +r.Warning > 0 || r.Status !== 'Enabled' || (r.Renewal && renewIn(r) < 30) ? 'bad' : +r.Suspended > 0 || assignedOf(r) > +r.Bought ? 'warn' : 'ok';
   const gb = mb => mb >= 1024 ? (mb / 1024).toFixed(1).replace(/\.0$/, '') + ' GB' : mb + ' MB';
   const licAll = (data.licences || []).filter(r => !client || r.Client === client), luAll = (data.licusers || []).filter(u => !client || u.Client === client);
   // Tenant capacity (tenants rows): red when a storage type is at its entitlement or the admin center says so (Microsoft then blocks environment
@@ -295,26 +295,28 @@ function render() {
   const pctOf = (t, k) => +t[k + 'Total'] > 0 ? +t[k + 'Used'] / +t[k + 'Total'] : 0;
   const capCls = t => (t.CapStatus && t.CapStatus !== 'Available') || ['Db', 'File', 'Log'].some(k => pctOf(t, k) >= 1) ? 'bad' : ['Db', 'File', 'Log'].some(k => pctOf(t, k) >= 0.8) ? 'warn' : '';
   const capCell = (t, k) => +t[k + 'Total'] > 0 ? `${gb(+t[k + 'Used'])} / ${gb(+t[k + 'Total'])} <span class="${pctOf(t, k) >= 1 ? 'c-bad' : pctOf(t, k) >= 0.8 ? 'c-warn' : 'muted'}">(${Math.round(100 * pctOf(t, k))}%)</span>` : '—';
-  const licRed = licAll.filter(r => licCls(r) === 'bad').length + tn.filter(t => capCls(t) === 'bad').length;
+  const overOf = r => free(r) ? 0 : Math.max(0, assignedOf(r) - +r.Bought);
+  const licRed = licAll.filter(r => licCls(r) === 'bad').length, capRedAll = tn.filter(t => capCls(t) === 'bad').length;
   document.querySelector('.tabs [data-tab="lic"]').innerHTML = 'Licences' + (licRed + luAll.length ? `<span class="badge">${licRed + luAll.length}</span>` : '');
+  document.querySelector('.tabs [data-tab="cap"]').innerHTML = 'Capacity' + (capRedAll ? `<span class="badge">${capRedAll}</span>` : '');
+  const clientsHere = Object.keys(latest).filter(c => !client || c === client).sort();
+  // Licences and Capacity are two tabs since 2026-10-28 (the user: a full database hid licence problems in the merged status line), each with one
+  // recap card per client. Unused seats are not an alert any more: the Plans table's Available column shows them when one looks.
   if (tab === 'lic') {
     const hideFree = document.getElementById('hidefree').checked;
-    // One recap per client (the page's client filter leaves one): the user asked for it on 2026-10-28, the merged figures hid which tenant was the problem.
-    for (const cl of Object.keys(latest).filter(c => !client || c === client).sort()) {
-      const licC = licAll.filter(r => r.Client === cl), tnC = tn.filter(t => t.Client === cl), luC = luAll.filter(u => u.Client === cl);
-      const paid = licC.filter(r => !free(r)), capRed = tnC.filter(t => capCls(t) === 'bad').length, red = licC.filter(r => licCls(r) === 'bad').length + capRed, yellow = licC.filter(r => licCls(r) === 'warn').length;
-      const unused = paid.reduce((n, r) => n + unusedOf(r), 0), nextRen = paid.filter(r => r.Renewal).sort((a, b) => a.Renewal.localeCompare(b.Renewal))[0];
-      const stale = Date.now() - new Date(latest[cl]) > STALE_MS;
-      const [label, tone] = !licC.length ? ['Not collected', 'grey'] : stale ? ['Stale data', 'grey'] : capRed ? ['Dataverse capacity exceeded', 'bad'] : red ? [`${red} plan${red > 1 ? 's' : ''} needing attention`, 'bad']
-        : luC.length ? [`${luC.length} disabled account${luC.length > 1 ? 's' : ''} licensed`, 'warn'] : yellow ? [`${yellow} plan${yellow > 1 ? 's' : ''} with unused seats`, 'warn'] : ['Licences OK', 'ok'];
+    for (const cl of clientsHere) {
+      const licC = licAll.filter(r => r.Client === cl), luC = luAll.filter(u => u.Client === cl), paid = licC.filter(r => !free(r));
+      const red = licC.filter(r => licCls(r) === 'bad').length, over = paid.reduce((n, r) => n + overOf(r), 0), overHard = paid.some(r => !perApp(r) && overOf(r) > 0);
+      const nextRen = paid.filter(r => r.Renewal).sort((a, b) => a.Renewal.localeCompare(b.Renewal))[0], stale = Date.now() - new Date(latest[cl]) > STALE_MS;
+      const [label, tone] = !licC.length ? ['Not collected', 'grey'] : stale ? ['Stale data', 'grey'] : red ? [`${red} plan${red > 1 ? 's' : ''} needing attention`, 'bad']
+        : luC.length ? [`${luC.length} disabled account${luC.length > 1 ? 's' : ''} licensed`, 'warn'] : ['Licences OK', 'ok'];
       h += `<div class="card health">
         <div class="status"><span class="dot" style="background:var(--${tone})"></span><b>${esc(cl)}</b><small class="c-${tone}">${label}</small></div>
         <div class="kpi"><div class="big">${sum(paid, 'Assigned')} / ${sum(paid, 'Bought')}</div><small>Paid seats assigned / bought</small></div>
-        <div class="stat"><div class="big">${sum(tnC, 'Users')}</div><small>Enabled users</small></div>
-        <div class="stat ${unused ? 'c-warn' : ''}"><a href="#plans" class="big">${unused}</a><small>Unused paid seats</small></div>
+        <div class="stat"><div class="big">${sum(tn.filter(t => t.Client === cl), 'Users')}</div><small>Enabled users</small></div>
+        <div class="stat ${over ? (overHard ? 'c-bad' : 'c-warn') : ''}"><a href="#plans" class="big">${over}</a><small>Seats assigned beyond bought</small></div>
         <div class="stat ${luC.length ? 'c-warn' : ''}"><a href="#licusers" class="big">${luC.length}</a><small>Disabled accounts licensed</small></div>
         <div class="stat ${nextRen && renewIn(nextRen) < 30 ? 'c-bad' : ''}"><div class="big">${nextRen ? nextRen.Renewal.slice(0, 10) : '—'}</div><small>Next renewal${nextRen ? ': ' + esc(skuName(nextRen.Sku)) : ''}</small></div>
-        <div class="stat ${Math.max(0, ...tnC.map(t => pctOf(t, 'Db'))) >= 1 ? 'c-bad' : Math.max(0, ...tnC.map(t => pctOf(t, 'Db'))) >= 0.8 ? 'c-warn' : ''}"><a href="#capacity" class="big">${sum(tnC, 'DbTotal') ? gb(sum(tnC, 'DbUsed')) + ' / ' + gb(sum(tnC, 'DbTotal')) : '—'}</a><small>Dataverse database used / entitled</small></div>
       </div>`;
     }
     const rank = { bad: 0, warn: 1, ok: 2, off: 3 };
@@ -325,9 +327,29 @@ function render() {
       h += `<h2 id="plans">Plans <span class="muted">(${lic.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Plan</th><th class="num">Bought</th><th class="num">Assigned</th><th class="num">Available</th><th>Renewal</th><th>Status</th></tr></thead><tbody>`;
       for (const r of lic) {
         const st = [r.Status === 'Enabled' ? 'Active' : r.Status, +r.Warning ? `${r.Warning} in grace` : '', +r.Suspended ? `${r.Suspended} suspended` : '', String(r.Trial) === 'True' ? 'trial' : ''].filter(Boolean).join(' · ');
-        h += `<tr class="${licCls(r)}"><td>${esc(r.Client)}</td><td class="flow" title="${esc(r.Sku)}">${esc(skuName(r.Sku))}${perApp(r) ? ` <span class="muted">(passes allocated to environments, see below${launchOf(r.Client, '', '') ? `; ${launchOf(r.Client, '', '').Users} users opened an app in 30 days` : ''})</span>` : ''}</td><td class="num">${free(r) ? '—' : r.Bought}</td><td class="num">${assignedOf(r)}</td><td class="num ${unusedOf(r) >= 3 ? 'c-warn' : ''}">${free(r) ? '—' : +r.Bought - assignedOf(r)}</td><td class="date ${r.Renewal && renewIn(r) < 30 ? 'c-bad' : ''}">${r.Renewal ? r.Renewal.slice(0, 10) + ` (${renewIn(r)} d)` : '—'}</td><td class="${licCls(r) === 'bad' ? 'c-bad' : ''}">${esc(st)}</td></tr>`;
+        h += `<tr class="${licCls(r)}"><td>${esc(r.Client)}</td><td class="flow" title="${esc(r.Sku)}">${esc(skuName(r.Sku))}${perApp(r) ? ` <span class="muted">(passes allocated to environments, see the Capacity tab${launchOf(r.Client, '', '') ? `; ${launchOf(r.Client, '', '').Users} users opened an app in 30 days` : ''})</span>` : ''}</td><td class="num">${free(r) ? '—' : r.Bought}</td><td class="num">${assignedOf(r)}</td><td class="num ${unusedOf(r) >= 3 ? 'c-warn' : ''}">${free(r) ? '—' : +r.Bought - assignedOf(r)}</td><td class="date ${r.Renewal && renewIn(r) < 30 ? 'c-bad' : ''}">${r.Renewal ? r.Renewal.slice(0, 10) + ` (${renewIn(r)} d)` : '—'}</td><td class="${licCls(r) === 'bad' ? 'c-bad' : ''}">${esc(st)}</td></tr>`;
       }
       h += '</tbody></table></div>';
+    }
+    if (luAll.length) {
+      h += `<h2 id="licusers">Disabled accounts still licensed <span class="muted">(${luAll.length})</span></h2><p class="muted">Seats paid for accounts that cannot sign in: remove the licence or delete the account.</p><div class="card wrap"><table><thead><tr><th>Client</th><th>User</th><th>Account</th><th>Licences</th></tr></thead><tbody>`;
+      for (const u of luAll.sort((a, b) => a.Client.localeCompare(b.Client) || a.User.localeCompare(b.User))) h += `<tr class="warn"><td>${esc(u.Client)}</td><td>${esc(u.User)}</td><td>${esc(u.Upn)}</td><td class="flow">${esc(u.Skus.split(', ').map(skuName).join(', '))}</td></tr>`;
+      h += '</tbody></table></div>';
+    }
+    document.getElementById('out').innerHTML = h;
+    return;
+  }
+  if (tab === 'cap') {
+    for (const cl of clientsHere) {
+      const tnC = tn.filter(t => t.Client === cl), envC = envAll.filter(e => e.Client === cl), capRed = tnC.filter(t => capCls(t) === 'bad').length, capWarn = tnC.filter(t => capCls(t) === 'warn').length;
+      const stale = Date.now() - new Date(latest[cl]) > STALE_MS, pct = k => Math.max(0, ...tnC.map(t => pctOf(t, k))), tot = k => sum(tnC, k + 'Total');
+      const [label, tone] = !tnC.length ? ['Not collected', 'grey'] : stale ? ['Stale data', 'grey'] : capRed ? ['Capacity exceeded', 'bad'] : capWarn ? ['Above 80% of entitlement', 'warn'] : ['Capacity OK', 'ok'];
+      const tile = (k, name) => `<div class="stat ${pct(k) >= 1 ? 'c-bad' : pct(k) >= 0.8 ? 'c-warn' : ''}"><a href="#capacity" class="big">${tot(k) ? gb(sum(tnC, k + 'Used')) + ' / ' + gb(tot(k)) : '—'}</a><small>${name} used / entitled</small></div>`;
+      h += `<div class="card health">
+        <div class="status"><span class="dot" style="background:var(--${tone})"></span><b>${esc(cl)}</b><small class="c-${tone}">${label}</small></div>
+        ${tile('Db', 'Database')}${tile('File', 'File')}${tile('Log', 'Log')}
+        <div class="stat"><a href="#envs" class="big">${envC.length}</a><small>Environment${envC.length === 1 ? '' : 's'}</small></div>
+      </div>`;
     }
     // Environments: Dataverse storage used (the tenant's entitlement is not readable through the API, so no colour: compare with the admin center's
     // Capacity page, 10 GB base plus what the licences add) and the add-ons allocated to each environment. Not filtered by "Problems only".
@@ -342,11 +364,6 @@ function render() {
       // Active users, 30 d: distinct accounts that opened any app in the environment (audit log). Against the per-app passes allocated to it: the usage the passes exist for.
       h += `<h2 id="envs">Environments <span class="muted">(${envs.length}, storage used, add-ons allocated, app users)</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Environment</th><th>Type</th><th class="num">Database</th><th class="num">File</th><th class="num">Log</th><th class="num">Per-app passes</th><th class="num" title="Distinct users who opened an app in the environment in the last 30 days (audit log)">App users, 30 d</th><th class="num">Per-flow plans</th><th>Other add-ons</th></tr></thead><tbody>`;
       for (const e of envs) h += `<tr><td>${esc(e.Client)}</td><td class="flow">${esc(e.Environment)}</td><td>${esc(e.Type)}</td><td class="num">${gb(+e.DbUsed)}</td><td class="num">${gb(+e.FileUsed)}</td><td class="num">${gb(+e.LogUsed)}</td><td class="num">${+e.AppPass || '—'}</td><td class="num">${usersOf(e.Client, e.EnvironmentId, '')}</td><td class="num">${+e.PerFlow || '—'}</td><td class="flow">${esc(e.Addons || '—')}</td></tr>`;
-      h += '</tbody></table></div>';
-    }
-    if (luAll.length) {
-      h += `<h2 id="licusers">Disabled accounts still licensed <span class="muted">(${luAll.length})</span></h2><p class="muted">Seats paid for accounts that cannot sign in: remove the licence or delete the account.</p><div class="card wrap"><table><thead><tr><th>Client</th><th>User</th><th>Account</th><th>Licences</th></tr></thead><tbody>`;
-      for (const u of luAll.sort((a, b) => a.Client.localeCompare(b.Client) || a.User.localeCompare(b.User))) h += `<tr class="warn"><td>${esc(u.Client)}</td><td>${esc(u.User)}</td><td>${esc(u.Upn)}</td><td class="flow">${esc(u.Skus.split(', ').map(skuName).join(', '))}</td></tr>`;
       h += '</tbody></table></div>';
     }
     document.getElementById('out').innerHTML = h;
@@ -460,8 +477,8 @@ document.getElementById('out').addEventListener('click', e => {
   const b = e.target.closest('button.copy'); if (!b) return;
   navigator.clipboard.writeText(b.dataset.url).then(() => { b.textContent = '✓'; setTimeout(() => b.innerHTML = COPY_SVG, 1200); });
 });
-// Tabs: pa (default, no hash), bi (#bi), apps (#apps), lic (#lic), help (#help), news (#news).
-let tab = ['bi', 'apps', 'lic', 'help', 'news'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'pa';
+// Tabs: pa (default, no hash), bi (#bi), apps (#apps), lic (#lic), cap (#cap), help (#help), news (#news).
+let tab = ['bi', 'apps', 'lic', 'cap', 'help', 'news'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'pa';
 const tabHash = () => tab === 'pa' ? '' : '#' + tab;
 document.querySelector('.tabs').addEventListener('click', e => {
   const b = e.target.closest('button[data-tab]'); if (!b) return;
