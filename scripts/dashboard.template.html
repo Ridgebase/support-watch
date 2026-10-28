@@ -56,7 +56,7 @@
   .health { display:flex; align-items:center; gap:24px; padding:16px; margin-bottom:20px; flex-wrap:wrap; }
   .health .status { text-align:center; min-width:80px; }
   .dot { width:16px; height:16px; border-radius:50%; display:inline-block; }
-  .status b { display:block; font-size:14px; }
+  .status b { display:block; font-size:14px; } .status small { display:block; font-size:12px; }
   .kpi { flex:1; min-width:180px; }
   .kpi .big { font-size:24px; font-weight:600; }
   .stat { text-align:center; border-left:1px solid var(--line2); padding-left:24px; }
@@ -295,24 +295,28 @@ function render() {
   const pctOf = (t, k) => +t[k + 'Total'] > 0 ? +t[k + 'Used'] / +t[k + 'Total'] : 0;
   const capCls = t => (t.CapStatus && t.CapStatus !== 'Available') || ['Db', 'File', 'Log'].some(k => pctOf(t, k) >= 1) ? 'bad' : ['Db', 'File', 'Log'].some(k => pctOf(t, k) >= 0.8) ? 'warn' : '';
   const capCell = (t, k) => +t[k + 'Total'] > 0 ? `${gb(+t[k + 'Used'])} / ${gb(+t[k + 'Total'])} <span class="${pctOf(t, k) >= 1 ? 'c-bad' : pctOf(t, k) >= 0.8 ? 'c-warn' : 'muted'}">(${Math.round(100 * pctOf(t, k))}%)</span>` : '—';
-  const licRed = licAll.filter(r => licCls(r) === 'bad').length + tn.filter(t => capCls(t) === 'bad').length, licYellow = licAll.filter(r => licCls(r) === 'warn').length;
+  const licRed = licAll.filter(r => licCls(r) === 'bad').length + tn.filter(t => capCls(t) === 'bad').length;
   document.querySelector('.tabs [data-tab="lic"]').innerHTML = 'Licences' + (licRed + luAll.length ? `<span class="badge">${licRed + luAll.length}</span>` : '');
   if (tab === 'lic') {
     const hideFree = document.getElementById('hidefree').checked;
-    const paid = licAll.filter(r => !free(r)), capRed = tn.filter(t => capCls(t) === 'bad').length;
-    const unused = paid.reduce((n, r) => n + unusedOf(r), 0), nextRen = paid.filter(r => r.Renewal).sort((a, b) => a.Renewal.localeCompare(b.Renewal))[0];
-    const stale = Object.keys(latest).filter(c => !client || c === client).some(c => Date.now() - new Date(latest[c]) > STALE_MS);
-    const [label, tone] = !licAll.length ? ['Not collected', 'grey'] : stale ? ['Stale data', 'grey'] : capRed ? ['Dataverse capacity exceeded', 'bad'] : licRed ? [`${licRed} plan${licRed > 1 ? 's' : ''} needing attention`, 'bad']
-      : luAll.length ? [`${luAll.length} disabled account${luAll.length > 1 ? 's' : ''} licensed`, 'warn'] : licYellow ? [`${licYellow} plan${licYellow > 1 ? 's' : ''} with unused seats`, 'warn'] : ['Licences OK', 'ok'];
-    h += `<div class="card health">
-      <div class="status"><span class="dot" style="background:var(--${tone})"></span><b class="c-${tone}">${label}</b></div>
-      <div class="kpi"><div class="big">${sum(paid, 'Assigned')} / ${sum(paid, 'Bought')}</div><small>Paid seats assigned / bought</small></div>
-      <div class="stat"><div class="big">${sum(tn, 'Users')}</div><small>Enabled users</small></div>
-      <div class="stat ${unused ? 'c-warn' : ''}"><a href="#plans" class="big">${unused}</a><small>Unused paid seats</small></div>
-      <div class="stat ${luAll.length ? 'c-warn' : ''}"><a href="#licusers" class="big">${luAll.length}</a><small>Disabled accounts licensed</small></div>
-      <div class="stat ${nextRen && renewIn(nextRen) < 30 ? 'c-bad' : ''}"><div class="big">${nextRen ? nextRen.Renewal.slice(0, 10) : '—'}</div><small>Next renewal${nextRen ? ': ' + esc(skuName(nextRen.Sku)) + (!client && Object.keys(latest).length > 1 ? ' (' + esc(nextRen.Client) + ')' : '') : ''}</small></div>
-      <div class="stat ${Math.max(0, ...tn.map(t => pctOf(t, 'Db'))) >= 1 ? 'c-bad' : Math.max(0, ...tn.map(t => pctOf(t, 'Db'))) >= 0.8 ? 'c-warn' : ''}"><a href="#capacity" class="big">${sum(tn, 'DbTotal') ? gb(sum(tn, 'DbUsed')) + ' / ' + gb(sum(tn, 'DbTotal')) : '—'}</a><small>Dataverse database used / entitled</small></div>
-    </div>`;
+    // One recap per client (the page's client filter leaves one): the user asked for it on 2026-10-28, the merged figures hid which tenant was the problem.
+    for (const cl of Object.keys(latest).filter(c => !client || c === client).sort()) {
+      const licC = licAll.filter(r => r.Client === cl), tnC = tn.filter(t => t.Client === cl), luC = luAll.filter(u => u.Client === cl);
+      const paid = licC.filter(r => !free(r)), capRed = tnC.filter(t => capCls(t) === 'bad').length, red = licC.filter(r => licCls(r) === 'bad').length + capRed, yellow = licC.filter(r => licCls(r) === 'warn').length;
+      const unused = paid.reduce((n, r) => n + unusedOf(r), 0), nextRen = paid.filter(r => r.Renewal).sort((a, b) => a.Renewal.localeCompare(b.Renewal))[0];
+      const stale = Date.now() - new Date(latest[cl]) > STALE_MS;
+      const [label, tone] = !licC.length ? ['Not collected', 'grey'] : stale ? ['Stale data', 'grey'] : capRed ? ['Dataverse capacity exceeded', 'bad'] : red ? [`${red} plan${red > 1 ? 's' : ''} needing attention`, 'bad']
+        : luC.length ? [`${luC.length} disabled account${luC.length > 1 ? 's' : ''} licensed`, 'warn'] : yellow ? [`${yellow} plan${yellow > 1 ? 's' : ''} with unused seats`, 'warn'] : ['Licences OK', 'ok'];
+      h += `<div class="card health">
+        <div class="status"><span class="dot" style="background:var(--${tone})"></span><b>${esc(cl)}</b><small class="c-${tone}">${label}</small></div>
+        <div class="kpi"><div class="big">${sum(paid, 'Assigned')} / ${sum(paid, 'Bought')}</div><small>Paid seats assigned / bought</small></div>
+        <div class="stat"><div class="big">${sum(tnC, 'Users')}</div><small>Enabled users</small></div>
+        <div class="stat ${unused ? 'c-warn' : ''}"><a href="#plans" class="big">${unused}</a><small>Unused paid seats</small></div>
+        <div class="stat ${luC.length ? 'c-warn' : ''}"><a href="#licusers" class="big">${luC.length}</a><small>Disabled accounts licensed</small></div>
+        <div class="stat ${nextRen && renewIn(nextRen) < 30 ? 'c-bad' : ''}"><div class="big">${nextRen ? nextRen.Renewal.slice(0, 10) : '—'}</div><small>Next renewal${nextRen ? ': ' + esc(skuName(nextRen.Sku)) : ''}</small></div>
+        <div class="stat ${Math.max(0, ...tnC.map(t => pctOf(t, 'Db'))) >= 1 ? 'c-bad' : Math.max(0, ...tnC.map(t => pctOf(t, 'Db'))) >= 0.8 ? 'c-warn' : ''}"><a href="#capacity" class="big">${sum(tnC, 'DbTotal') ? gb(sum(tnC, 'DbUsed')) + ' / ' + gb(sum(tnC, 'DbTotal')) : '—'}</a><small>Dataverse database used / entitled</small></div>
+      </div>`;
+    }
     const rank = { bad: 0, warn: 1, ok: 2, off: 3 };
     const lic = licAll.filter(r => (!hideFree || !free(r)) && (!only || ['bad', 'warn'].includes(licCls(r)))).sort((a, b) => rank[licCls(a)] - rank[licCls(b)] || a.Client.localeCompare(b.Client) || +b.Bought - +a.Bought);
     if (!licAll.length) h += '<p class="muted">Licences not collected in the last update (see the job log).</p>';
