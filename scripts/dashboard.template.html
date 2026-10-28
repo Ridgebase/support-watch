@@ -320,7 +320,7 @@ function render() {
       </div>`;
     }
     const rank = { bad: 0, warn: 1, ok: 2, off: 3 };
-    const lic = licAll.filter(r => (!hideFree || !free(r)) && (!only || ['bad', 'warn'].includes(licCls(r)))).sort((a, b) => rank[licCls(a)] - rank[licCls(b)] || a.Client.localeCompare(b.Client) || +b.Bought - +a.Bought);
+    const lic = licAll.filter(r => (!hideFree || !free(r)) && (!only || ['bad', 'warn'].includes(licCls(r)))).sort((a, b) => a.Client.localeCompare(b.Client) || rank[licCls(a)] - rank[licCls(b)] || +b.Bought - +a.Bought);
     if (!licAll.length) h += '<p class="muted">Licences not collected in the last update (see the job log).</p>';
     else if (!lic.length) h += '<p class="muted">Nothing to show.</p>';
     else {
