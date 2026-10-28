@@ -96,11 +96,11 @@ foreach ($c in $clients) {
         # The Flow API returns 503/504 timeouts now and then; without retries the flow lost all its runs for that build and showed UNREADABLE.
         $flowRows = $flows | ForEach-Object -ThrottleLimit $Parallel -Parallel {
             $flow = $_; $api = $using:api; $ver = $using:ver; $h = $using:h; $since = $using:since; $tz = $using:tz; $envId = ($using:env)['name']
-            # A flow the monitoring account does not own (admin listing only, absent from the user listing) refuses the user endpoints with 403 ConnectionAuthorizationFailed
-            # (SEMO 2026-10-28: 10 flows UNREADABLE in every snapshot, one of them failing every Monday for 5 weeks unseen): the admin scope reads its detail and runs; a run's actions have no admin route (404), so its failed runs keep the run banner.
-            $fapi = if (($using:mine)[$flow['name']]) { "$api/environments/$envId" } else { "$api/scopes/admin/environments/$envId" }
-            # The admin listing carries no definitionSummary (or one with empty triggers, 20 of 272 in SEMO): the flow's own GET does (trigger type, for the silent-flow check).
-            $ds = $flow['properties']['definitionSummary']; if (-not ($ds -and $ds['triggers'])) { try { $flow = (Invoke-WebRequest -Uri "$fapi/flows/$($flow['name'])?$ver" -Headers $h -MaximumRetryCount 2 -RetryIntervalSec 3 -TimeoutSec 30).Content | ConvertFrom-Json -AsHashtable } catch {} }
+            # A flow the monitoring account does not own refuses the user endpoints with 403 ConnectionAuthorizationFailed (SEMO 2026-10-28: 10 flows UNREADABLE in
+            # every snapshot, one failing every Monday for 5 weeks unseen): after a 403 the flow is read under the admin scope, which lists its runs and gives its detail
+            # but has no actions route (404), so its failed runs keep the run banner. Not decided from the listings: the user listing also omits solution flows the
+            # account does own (TSMO "Générer la facture QBO"), and those keep their action-level errors.
+            $fapi = "$api/environments/$envId"
             $fd = ($using:c).FlowDays; $fdName = $flow['properties']['displayName']; if ($fd -and $fd.$fdName) { $since = ($using:nowUtc).AddDays(-$fd.$fdName) }
             $utc = { param($s) [datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
             $cap = { param($m) $m = "$m".Trim(': ') -replace '\s+', ' '; if ($m.Length -gt 4000) { $m.Substring(0, 4000) + '...' } else { $m } }   # the user wants the whole message; 4000 only guards the CSV and the page
@@ -146,8 +146,10 @@ foreach ($c in $clients) {
                     }
                     $runs = @($runs | Where-Object { (& $utc $_['properties']['startTime']) -ge $since })
                     $status = $null; break
-                } catch { $status = 'UNREADABLE' }
+                } catch { $status = 'UNREADABLE'; if ($_.Exception.Response.StatusCode -eq 403) { $fapi = "$api/scopes/admin/environments/$envId" } }
             }
+            # The admin listing carries no definitionSummary (or one with empty triggers, 20 of 272 in SEMO): the flow's own GET does (trigger type, for the silent-flow check).
+            $ds = $flow['properties']['definitionSummary']; if (-not ($ds -and $ds['triggers'])) { try { $flow = (Invoke-WebRequest -Uri "$fapi/flows/$($flow['name'])?$ver" -Headers $h -MaximumRetryCount 2 -RetryIntervalSec 3 -TimeoutSec 30).Content | ConvertFrom-Json -AsHashtable } catch {} }
             $tr = try { $t = $flow['properties']['definitionSummary']['triggers'][0]; "$($t['type'])/$($t['kind'])" } catch { '' }
             $base = @{ Flow = $flow['properties']['displayName']; FlowId = $flow['name']; Enabled = ($flow['properties']['state'] -eq 'Started'); Trigger = $tr }
             if ($status)             { [pscustomobject]($base + @{ Start = ''; Status = $status }) }
