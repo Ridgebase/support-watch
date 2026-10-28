@@ -56,6 +56,7 @@
   .health { display:flex; align-items:center; gap:24px; padding:16px; margin-bottom:20px; flex-wrap:wrap; }
   .health .status { text-align:center; min-width:80px; }
   .dot { width:16px; height:16px; border-radius:50%; display:inline-block; }
+  .swatch { display:inline-block; width:12px; height:12px; border:1px solid var(--line); border-radius:3px; vertical-align:-1px; margin-right:5px; background:var(--card); } .legend { font-size:12px; margin:-8px 0 12px; }
   .status b { display:block; font-size:14px; } .status small { display:block; font-size:12px; }
   .kpi { flex:1; min-width:180px; }
   .kpi .big { font-size:24px; font-weight:600; }
@@ -324,7 +325,7 @@ function render() {
     if (!licAll.length) h += '<p class="muted">Licences not collected in the last update (see the job log).</p>';
     else if (!lic.length) h += '<p class="muted">Nothing to show.</p>';
     else {
-      h += `<h2 id="plans">Plans <span class="muted">(${lic.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Plan</th><th class="num">Bought</th><th class="num">Assigned</th><th class="num">Available</th><th>Renewal</th><th>Status</th></tr></thead><tbody>`;
+      h += `<h2 id="plans">Plans <span class="muted">(${lic.length})</span></h2><p class="muted legend"><span class="swatch" style="background:var(--badbg)"></span>Red: more seats assigned than bought, seats in grace, plan not active, or renewal within 30 days &nbsp; <span class="swatch" style="background:var(--warnbg)"></span>Yellow: per-app passes allocated beyond bought, or suspended seats &nbsp; <span class="swatch" style="background:var(--okbg)"></span>Green: paid plan in good standing &nbsp; <span class="swatch"></span>White: free, trial or expired plan, nothing paid</p><div class="card wrap"><table><thead><tr><th>Client</th><th>Plan</th><th class="num">Bought</th><th class="num">Assigned</th><th class="num">Available</th><th>Renewal</th><th>Status</th></tr></thead><tbody>`;
       for (const r of lic) {
         const st = [r.Status === 'Enabled' ? 'Active' : r.Status, +r.Warning ? `${r.Warning} in grace` : '', +r.Suspended ? `${r.Suspended} suspended` : '', String(r.Trial) === 'True' ? 'trial' : ''].filter(Boolean).join(' · ');
         h += `<tr class="${licCls(r)}"><td>${esc(r.Client)}</td><td class="flow" title="${esc(r.Sku)}">${esc(skuName(r.Sku))}${perApp(r) ? ` <span class="muted">(passes allocated to environments, see the Capacity tab${launchOf(r.Client, '', '') ? `; ${launchOf(r.Client, '', '').Users} users opened an app in 30 days` : ''})</span>` : ''}</td><td class="num">${free(r) ? '—' : r.Bought}</td><td class="num">${assignedOf(r)}</td><td class="num ${unusedOf(r) >= 3 ? 'c-warn' : ''}">${free(r) ? '—' : +r.Bought - assignedOf(r)}</td><td class="date ${r.Renewal && renewIn(r) < 30 ? 'c-bad' : ''}">${r.Renewal ? r.Renewal.slice(0, 10) + ` (${renewIn(r)} d)` : '—'}</td><td class="${licCls(r) === 'bad' ? 'c-bad' : ''}">${esc(st)}</td></tr>`;
