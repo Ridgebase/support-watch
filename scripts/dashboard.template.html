@@ -312,7 +312,7 @@ function render() {
         : luC.length ? [`${luC.length} disabled account${luC.length > 1 ? 's' : ''} licensed`, 'warn'] : ['Licences OK', 'ok'];
       h += `<div class="card health">
         <div class="status"><span class="dot" style="background:var(--${tone})"></span><b>${esc(cl)}</b><small class="c-${tone}">${label}</small></div>
-        <div class="kpi"><div class="big">${sum(paid, 'Assigned')} / ${sum(paid, 'Bought')}</div><small>Paid seats assigned / bought</small></div>
+        <div class="kpi"><div class="big">${paid.reduce((n, r) => n + assignedOf(r), 0)} / ${sum(paid, 'Bought')}</div><small>Paid seats assigned / bought</small></div>
         <div class="stat"><div class="big">${sum(tn.filter(t => t.Client === cl), 'Users')}</div><small>Enabled users</small></div>
         <div class="stat ${over ? (overHard ? 'c-bad' : 'c-warn') : ''}"><a href="#plans" class="big">${over}</a><small>Seats assigned beyond bought</small></div>
         <div class="stat ${luC.length ? 'c-warn' : ''}"><a href="#licusers" class="big">${luC.length}</a><small>Disabled accounts licensed</small></div>
