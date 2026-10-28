@@ -45,8 +45,9 @@ README.md says what the system is and how it runs. This file is what to know bef
 - Failed runs: the run's own error is always the same banner, so the collector reads the failed action and its outputs for a flow's
   30 newest failed runs (two extra API calls each); older ones keep the banner and the page groups them as "not inspected".
 - Flow listing: the admin endpoint (`scopes/admin/.../v2/flows`, Started flows only), because the user listing omits most solution flows even
-  when the monitoring account created them (SEMO 2026-10-26: 59 of 265). Flows by other people get their runs read fine but their detail GET is
-  refused (ConnectionAuthorizationFailed), so they have no trigger type and are never flagged silent.
+  when the monitoring account created them (SEMO 2026-10-26: 59 of 265). Flows owned by other people refuse the user endpoints (403
+  ConnectionAuthorizationFailed: they showed as "unreachable" until 2026-10-28), so their detail and runs are read under `scopes/admin/`
+  too; a run's actions have no admin route, so their failed runs keep the generic run banner.
 - Stuck runs: a run still Running after 2 h (`$stuckAfterMin` in build-dashboard.ps1). The user knows the flows: none legitimately takes that long.
 - Stale clients: notify.ps1 emails once per episode when a client's snapshot is over an hour old; "already announced" checks compare with the saved state ($prev), never with the state rebuilt for the run.
 - Silent flows: recurrence flows only, 1.5x the longest gap between runs this week, measured on a weekday clock when the flow never ran on

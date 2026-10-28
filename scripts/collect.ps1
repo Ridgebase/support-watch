@@ -96,8 +96,11 @@ foreach ($c in $clients) {
         # The Flow API returns 503/504 timeouts now and then; without retries the flow lost all its runs for that build and showed UNREADABLE.
         $flowRows = $flows | ForEach-Object -ThrottleLimit $Parallel -Parallel {
             $flow = $_; $api = $using:api; $ver = $using:ver; $h = $using:h; $since = $using:since; $tz = $using:tz; $envId = ($using:env)['name']
-            # The admin listing carries no definitionSummary: the flow's own GET does (trigger type, for the silent-flow check).
-            if (-not $flow['properties']['definitionSummary']) { try { $flow = (Invoke-WebRequest -Uri "$api/environments/$envId/flows/$($flow['name'])?$ver" -Headers $h -MaximumRetryCount 2 -RetryIntervalSec 3 -TimeoutSec 30).Content | ConvertFrom-Json -AsHashtable } catch {} }
+            # A flow the monitoring account does not own (admin listing only, absent from the user listing) refuses the user endpoints with 403 ConnectionAuthorizationFailed
+            # (SEMO 2026-10-28: 10 flows UNREADABLE in every snapshot, one of them failing every Monday for 5 weeks unseen): the admin scope reads its detail and runs; a run's actions have no admin route (404), so its failed runs keep the run banner.
+            $fapi = if (($using:mine)[$flow['name']]) { "$api/environments/$envId" } else { "$api/scopes/admin/environments/$envId" }
+            # The admin listing carries no definitionSummary (or one with empty triggers, 20 of 272 in SEMO): the flow's own GET does (trigger type, for the silent-flow check).
+            $ds = $flow['properties']['definitionSummary']; if (-not ($ds -and $ds['triggers'])) { try { $flow = (Invoke-WebRequest -Uri "$fapi/flows/$($flow['name'])?$ver" -Headers $h -MaximumRetryCount 2 -RetryIntervalSec 3 -TimeoutSec 30).Content | ConvertFrom-Json -AsHashtable } catch {} }
             $fd = ($using:c).FlowDays; $fdName = $flow['properties']['displayName']; if ($fd -and $fd.$fdName) { $since = ($using:nowUtc).AddDays(-$fd.$fdName) }
             $utc = { param($s) [datetime]::Parse($s, [cultureinfo]::InvariantCulture, [Globalization.DateTimeStyles]::AdjustToUniversal) }
             $cap = { param($m) $m = "$m".Trim(': ') -replace '\s+', ' '; if ($m.Length -gt 4000) { $m.Substring(0, 4000) + '...' } else { $m } }   # the user wants the whole message; 4000 only guards the CSV and the page
@@ -122,7 +125,7 @@ foreach ($c in $clients) {
                 } catch { '' } }
             $actErr = { param($runName)
                 try {
-                    $acts = ((Invoke-WebRequest -Uri "$api/environments/$envId/flows/$($flow['name'])/runs/$runName/actions?$ver" -Headers $h -MaximumRetryCount 2 -RetryIntervalSec 3 -TimeoutSec 30).Content | ConvertFrom-Json -AsHashtable)['value']
+                    $acts = ((Invoke-WebRequest -Uri "$fapi/flows/$($flow['name'])/runs/$runName/actions?$ver" -Headers $h -MaximumRetryCount 2 -RetryIntervalSec 3 -TimeoutSec 30).Content | ConvertFrom-Json -AsHashtable)['value']
                     $failed = @($acts | Where-Object { $_['properties']['status'] -eq 'Failed' })
                     $leaves = @($failed | Where-Object { $_['properties']['code'] -ne 'ActionFailed' }); if (-not $leaves) { $leaves = $failed }
                     $parts = @($leaves | Select-Object -First 2 | ForEach-Object { $e = $_['properties']['error']; "$($_['name'] -replace '_', ' '): $(if ($e -and $e['message'] -and $e['code'] -ne 'ActionFailed') { $e['message'] } else { $_['properties']['code'] })" })
@@ -131,7 +134,7 @@ foreach ($c in $clients) {
                     & $cap ($parts -join '; ')
                 } catch { '' }
             }
-            $start = "$api/environments/$envId/flows/$($flow['name'])/runs?$ver"; $runs = @(); $status = $null
+            $start = "$fapi/flows/$($flow['name'])/runs?$ver"; $runs = @(); $status = $null
             # A timeout throws (-MaximumRetryCount only covers HTTP error codes), so a flow gets a second full attempt before it is UNREADABLE.
             foreach ($attempt in 1, 2) {
                 $url = $start; $runs = @()
@@ -151,7 +154,7 @@ foreach ($c in $clients) {
             elseif ($runs.Count -eq 0) { [pscustomobject]($base + @{ Start = ''; Status = 'NO_RUNS' }) }
             else { $nf = 0; foreach ($run in $runs) {   # runs come newest first: the 30 newest failed runs get the action-level error, older ones the run's banner
                 $e = & $err $run['properties']['error']
-                if ($run['properties']['status'] -eq 'Failed' -and $nf++ -lt 30) { $a = & $actErr $run['name']; if ($a) { $e = $a } }
+                if ($run['properties']['status'] -eq 'Failed' -and $fapi -notlike '*/scopes/admin/*' -and $nf++ -lt 30) { $a = & $actErr $run['name']; if ($a) { $e = $a } }
                 [pscustomobject]($base + @{ Start = [TimeZoneInfo]::ConvertTimeFromUtc((& $utc $run['properties']['startTime']), $tz).ToString('s'); Status = $run['properties']['status']; RunId = $run['name']; Error = $e }) } }
         }
         foreach ($fr in $flowRows) {
