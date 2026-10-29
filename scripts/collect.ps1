@@ -111,7 +111,9 @@ foreach ($c in $clients) {
             # leaf's outputs (a short-lived blob URL in outputsLink, no auth), whose body carries the connector's message:
             # "List files: BadRequest - Check your request parameters to make sure the path '' exists on your file system."
             # Containers (Scope, Apply to each, Condition) fail with ActionFailed because a child did, so the leaves are the failed actions
-            # with another code; a failure inside a loop iteration shows only its container.
+            # with another code. Inside a loop, this listing gives an action (and its Scope and Condition) a bare NotSpecified, with no error and
+            # no outputs: its iterations (repetitions) carry the real code and outputs, so the first failed one stands in for it (one more call).
+            # Of the leaves, the first that yields a connector message is named first (SEMO 2026-10-29: "Create invoice in BC: BadRequest - ...").
             $err = { param($e) if ($e) { & $cap "$($e['code']): $($e['message'])" } else { '' } }
             $outMsg = { param($uri) try {
                     $b = (((Invoke-WebRequest -Uri $uri -TimeoutSec 15).Content | ConvertFrom-Json -AsHashtable))['body']
@@ -130,10 +132,20 @@ foreach ($c in $clients) {
                     $acts = ((Invoke-WebRequest -Uri "$fapi/flows/$($flow['name'])/runs/$runName/actions?$ver" -Headers $h -MaximumRetryCount 2 -RetryIntervalSec 3 -TimeoutSec 30).Content | ConvertFrom-Json -AsHashtable)['value']
                     $failed = @($acts | Where-Object { $_['properties']['status'] -eq 'Failed' })
                     $leaves = @($failed | Where-Object { $_['properties']['code'] -ne 'ActionFailed' }); if (-not $leaves) { $leaves = $failed }
-                    $parts = @($leaves | Select-Object -First 2 | ForEach-Object { $e = $_['properties']['error']; "$($_['name'] -replace '_', ' '): $(if ($e -and $e['message'] -and $e['code'] -ne 'ActionFailed') { $e['message'] } else { $_['properties']['code'] })" })
-                    $uri = try { $leaves[0]['properties']['outputsLink']['uri'] } catch { $null }
-                    if ($parts -and $uri) { $m = & $outMsg $uri; if ($m) { $parts[0] += " - $m" } }
-                    & $cap ($parts -join '; ')
+                    $parts = @(); $found = $false
+                    foreach ($l in @($leaves | Select-Object -First 3)) {
+                        $p = $l['properties']; $e = $p['error']; $code = $p['code']; $uri = try { $p['outputsLink']['uri'] } catch { $null }
+                        if (-not $uri -and -not $found) {   # inside a loop: the first failed iteration. ponytail: first page of iterations only
+                            try {
+                                $rep = @(((Invoke-WebRequest -Uri "$fapi/flows/$($flow['name'])/runs/$runName/actions/$($l['name'])/repetitions?$ver" -Headers $h -MaximumRetryCount 2 -RetryIntervalSec 3 -TimeoutSec 30).Content | ConvertFrom-Json -AsHashtable)['value'] | Where-Object { $_['properties']['status'] -eq 'Failed' })
+                                if ($rep) { $code = $rep[0]['properties']['code']; $e = $rep[0]['properties']['error']; $uri = try { $rep[0]['properties']['outputsLink']['uri'] } catch { $null } }
+                            } catch {}
+                        }
+                        $label = "$($l['name'] -replace '_', ' '): $(if ($e -and $e['message'] -and $e['code'] -ne 'ActionFailed') { $e['message'] } else { $code })"
+                        $m = if (-not $found -and $uri) { & $outMsg $uri } else { '' }
+                        if ($m) { $parts = @("$label - $m") + $parts; $found = $true } else { $parts += $label }
+                    }
+                    & $cap (@($parts | Select-Object -First 2) -join '; ')
                 } catch { '' }
             }
             $start = "$fapi/flows/$($flow['name'])/runs?$ver"; $runs = @(); $status = $null
