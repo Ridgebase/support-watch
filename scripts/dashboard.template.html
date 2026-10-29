@@ -52,6 +52,8 @@
   .tabs button { font:inherit; font-size:14px; color:var(--muted); background:none; border:0; border-bottom:2px solid transparent; margin-bottom:-1px; padding:8px 14px; cursor:pointer; }
   .tabs button:hover { color:var(--fg); }
   .tabs button.active { color:var(--fg); border-bottom-color:var(--accent); font-weight:600; }
+  .info { display:inline-block; width:16px; height:16px; margin-left:6px; border-radius:50%; border:1px solid currentColor; font:italic 600 11px/15px Georgia, serif; text-align:center; vertical-align:middle; opacity:.55; cursor:help; }   /* hover (or focus) for the title tooltip */
+  .info:hover, .info:focus { opacity:1; }
   .tabs .badge { display:inline-block; min-width:18px; padding:0 5px; margin-left:6px; border-radius:9px; background:var(--bad); color:#fff; font-size:11px; font-weight:600; line-height:18px; text-align:center; }
   .health { display:flex; align-items:center; gap:24px; padding:16px; margin-bottom:20px; flex-wrap:wrap; }
   .health .status { text-align:center; min-width:80px; }
@@ -429,7 +431,13 @@ function render() {
       h += '</tbody></table></div>';
     }
     if (data.odooAt && !only) {
-      h += `<h2 id="odchanges">Changes <span class="muted">(${changes.length}, last 7 days, OdooBot's left out)</span></h2>`;
+      const ODOO_CHANGES_INFO = 'What is listed here (last 7 days):\n'
+        + '• Field changes Odoo tracks, as "old → new (Field)": contacts (name, company, email, phone, address), users (login, status, groups), scheduled actions, access rules, and ticket stage, assignee, priority and customer.\n'
+        + '• Creations Odoo notes: "Contact created", "User created" (not tickets: see the Helpdesk tab).\n'
+        + '• With the ridgebase_support audit log: deletions of contacts, users, groups, scheduled actions and access rules, and creations, edits (old → new) and deletions of helpdesk teams, stages, SLAs, tags, server actions, automation rules, mail templates, mail servers and system parameters. Passwords and keys show as (hidden).\n'
+        + '• Without it: the same config records edited, who and when only (greyed).\n\n'
+        + 'Not listed: changes by OdooBot (module installs, automatic jobs), fields Odoo does not track (e.g. a ticket description), messages and emails.';
+      h += `<h2 id="odchanges">Changes <span class="muted">(${changes.length}, last 7 days, OdooBot's left out)</span><span class="info" tabindex="0" title="${esc(ODOO_CHANGES_INFO)}">i</span></h2>`;
       if (!changes.length) h += '<p class="muted">No change.</p>';
       else {
         h += '<div class="card wrap" style="margin-bottom:20px"><table><thead><tr><th>When</th><th>Who</th><th>Record</th><th>Change</th></tr></thead><tbody>';
