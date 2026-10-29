@@ -338,7 +338,8 @@ if ($env:ODOOSH_URL -and $env:ODOOSH_KEY) {
             $sdt = { param($v) if ($v -is [string] -and $v) { & $toLocal ($v.Replace(' ', 'T') + 'Z') } else { '' } }   # Odoo dates: naive UTC strings
             $ago = { param($h) [datetime]::UtcNow.AddHours(-$h).ToString('yyyy-MM-dd HH:mm:ss') }
             $rec = { param($model, $id) "$su/web#model=$model&id=$id" }
-            if (@(& $q ir.config_parameter @(, @('key', '=', 'database.is_neutralized')) @('value')).Count) { & $add health '' '' '' '' 'Database neutralized: no mail goes out and the crons are off' }
+            # Odoo.sh neutralizes its staging copies of production on purpose; elsewhere (production) it is a problem. The database name holds the branch.
+            if (@(& $q ir.config_parameter @(, @('key', '=', 'database.is_neutralized')) @('value')).Count -and $sdb -notmatch '-staging-') { & $add health '' '' '' '' 'Database neutralized: no mail goes out and the crons are off' }
             foreach ($m in & $q ir.module.module @(, @('name', '=', 'ridgebase_support')) @('state', 'installed_version', 'write_date')) { & $add module (& $sdt $m.write_date) '' '' 'ridgebase_support' "$($m.state) $($m.installed_version)" }
             foreach ($c in & $q ir.cron @(, @('failure_count', '>', 0)) @('cron_name', 'failure_count', 'first_failure_date')) {
                 & $add cron (& $sdt $c.first_failure_date) '' 'Scheduled action' $c.cron_name "Failed $($c.failure_count) time(s) in a row" (& $rec ir.cron $c.id) }
