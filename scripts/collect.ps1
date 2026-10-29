@@ -316,8 +316,9 @@ foreach ($hs in $hdSources | Where-Object { $_.Url -and $_.Key }) {
 #   cron    active scheduled actions that failed (failure_count) or are 2 h past their next call
 #   mail    outgoing mails in exception, or still queued after an hour
 #   change  tracked field changes, 7 days. Odoo 20 has no mail.tracking.value: a change is a mail.message of type 'tracking', "old → new (Field)"
-#           in its preview. It covers users, groups, access rules and scheduled actions too. OdooBot's (module installs, crons) left out.
-#   edit    records of the untracked config models edited in 7 days: who and when, not what (write_uid/write_date keep the last edit only)
+#           in its preview. It covers users, groups, access rules and scheduled actions too. Also the records' creation notes ("Contact created").
+#           And ridgebase_support's audit log: deletions, and creations and edits of the untracked config models. OdooBot's (installs, crons) left out.
+#   edit    without that audit log only: records of the untracked config models edited in 7 days, who and when (write_uid/write_date keep the last edit only)
 #   login   sign-ins, 7 days (res.users.log), except ODOOSH_USER's: this job's own sign-in leaves a row every run. Hence a dedicated user, not a person's.
 $odoo = [System.Collections.Generic.List[object]]::new(); $odooAt = ''
 if ($env:ODOOSH_URL -and $env:ODOOSH_KEY) {
@@ -346,12 +347,21 @@ if ($env:ODOOSH_URL -and $env:ODOOSH_KEY) {
             foreach ($m in & $q mail.mail @('|', @('state', '=', 'exception'), '&', @('state', '=', 'outgoing'), @('create_date', '<', (& $ago 1))) @('subject', 'state', 'failure_reason', 'create_date')) {
                 & $add mail (& $sdt $m.create_date) '' 'Email' "$($m.subject)" $(if ($m.state -eq 'exception') { "Failed: $($m.failure_reason)" } else { 'Still queued after an hour' }) }
             $week = & $ago 168
-            foreach ($m in & $q mail.message @(@('message_type', '=', 'tracking'), @('date', '>=', $week), @('create_uid', '!=', 1)) @('date', 'model', 'res_id', 'record_name', 'author_id', 'preview') 'date desc') {
+            # Tracking messages, plus the record's own notes ("Contact created"), except tickets' (the Helpdesk tab covers them) and Discuss chats'.
+            foreach ($m in & $q mail.message @(@('date', '>=', $week), @('create_uid', '!=', 1), '|', @('message_type', '=', 'tracking'), '&', @('message_type', '=', 'notification'), @('model', 'not in', @('helpdesk.ticket', 'discuss.channel'))) @('date', 'model', 'res_id', 'record_name', 'author_id', 'preview') 'date desc') {
                 & $add change (& $sdt $m.date) (& $m2o $m.author_id) $m.model "$($m.record_name)" "$($m.preview)" (& $rec $m.model $m.res_id) }
-            # ponytail: hand-kept list of the config models without tracking; a model missing from this database (base.automation without its module) is skipped.
-            foreach ($model in 'helpdesk.team', 'helpdesk.stage', 'helpdesk.sla', 'helpdesk.tag', 'base.automation', 'ir.actions.server', 'mail.template', 'ir.mail_server', 'fetchmail.server', 'ir.config_parameter') {
-                try { $list = & $q $model @(@('write_date', '>=', $week), @('write_uid', '!=', 1)) @('display_name', 'write_date', 'write_uid') 'write_date desc' } catch { continue }
-                foreach ($r in $list) { & $add edit (& $sdt $r.write_date) (& $m2o $r.write_uid) $model "$($r.display_name)" 'Edited (this model keeps no change history)' (& $rec $model $r.id) }
+            # ridgebase_support's audit log (models/audit_log.py): deletions, and creations and edits (old → new) of the config models without tracking.
+            # A database without it (module not updated yet) falls back to write_uid/write_date on those models: who and when, not what.
+            $hasAudit = $true; try { $audit = & $q ridgebase.audit.log @(, @('create_date', '>=', $week)) @('create_date', 'create_uid', 'model', 'res_id', 'record_name', 'operation', 'changes') } catch { $hasAudit = $false }
+            if ($hasAudit) {
+                $op = @{ create = 'Created'; write = 'Edited'; unlink = 'Deleted' }
+                foreach ($a in $audit) { & $add change (& $sdt $a.create_date) (& $m2o $a.create_uid) $a.model "$($a.record_name)" "$($op[$a.operation])$(if ($a.changes) { ": $($a.changes)" })" $(if ($a.operation -ne 'unlink') { & $rec $a.model $a.res_id }) }
+            } else {
+                # ponytail: hand-kept list of the config models without tracking; a model missing from this database (base.automation without its module) is skipped.
+                foreach ($model in 'helpdesk.team', 'helpdesk.stage', 'helpdesk.sla', 'helpdesk.tag', 'base.automation', 'ir.actions.server', 'mail.template', 'ir.mail_server', 'fetchmail.server', 'ir.config_parameter') {
+                    try { $list = & $q $model @(@('write_date', '>=', $week), @('write_uid', '!=', 1)) @('display_name', 'write_date', 'write_uid') 'write_date desc' } catch { continue }
+                    foreach ($r in $list) { & $add edit (& $sdt $r.write_date) (& $m2o $r.write_uid) $model "$($r.display_name)" 'Edited (this model keeps no change history)' (& $rec $model $r.id) }
+                }
             }
             foreach ($l in & $q res.users.log @(@('create_date', '>=', $week), @('create_uid', '!=', $suid)) @('create_date', 'create_uid')) { & $add login (& $sdt $l.create_date) (& $m2o $l.create_uid) '' '' '' }
             # Model labels ("User" rather than res.users) for the change and edit rows.
