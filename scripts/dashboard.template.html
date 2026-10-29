@@ -32,7 +32,7 @@
   .controls input[type=search] { font:inherit; color:var(--fg); background:var(--card); border:1px solid var(--line); border-radius:6px; padding:6px 10px; width:220px; }
   .controls input[type=search]:hover { border-color:var(--muted); } .controls input[type=search]:focus { outline:2px solid var(--accent); outline-offset:1px; }
   .controls label[data-for] { display:none; }   /* the second switch depends on the tab */
-  body[data-tab="pa"] .controls label[data-for="pa"], body[data-tab="bi"] .controls label[data-for="bi"], body[data-tab="apps"] .controls label[data-for="apps"], body[data-tab="lic"] .controls label[data-for="lic"] { display:inline-flex; }
+  body[data-tab="pa"] .controls label[data-for="pa"], body[data-tab="bi"] .controls label[data-for="bi"], body[data-tab="apps"] .controls label[data-for="apps"], body[data-tab="lic"] .controls label[data-for="lic"], body[data-tab="news"] .controls label[data-for="news"] { display:inline-flex; }
   td.text { white-space:normal; min-width:160px; max-width:560px; }   /* error messages and connector lists wrap too */
   body[data-tab="apps"] th, body[data-tab="apps"] td, body[data-tab="help"] th, body[data-tab="help"] td, body[data-tab="news"] th, body[data-tab="news"] td, body[data-tab="odoo"] th, body[data-tab="odoo"] td { white-space:normal; }
   body[data-tab="apps"] td.date, body[data-tab="help"] td.date, body[data-tab="news"] td.date, body[data-tab="odoo"] td.date { white-space:nowrap; }
@@ -105,6 +105,7 @@
   <label data-for="pa"><span class="switch"><input type="checkbox" id="hidequiet" checked><span></span></span>Hide flows with 0 runs</label>
   <label data-for="bi"><span class="switch"><input type="checkbox" id="hidedisabled" checked><span></span></span>Hide disabled and stale models</label>
   <label data-for="lic"><span class="switch"><input type="checkbox" id="hidefree" checked><span></span></span>Hide free, trial and expired plans</label>
+  <label data-for="news"><span class="switch"><input type="checkbox" id="showclosed"><span></span></span>Show closed messages</label>
 </div>
 <div class="tabs" role="tablist"><button class="active" data-tab="pa" role="tab">Power Automate</button><button data-tab="bi" role="tab">Power BI</button><button data-tab="apps" role="tab">Power Apps</button><button data-tab="lic" role="tab">Licences</button><button data-tab="cap" role="tab">Capacity</button><button data-tab="news" role="tab">Tech watch</button><button data-tab="help" role="tab">Helpdesk</button><button data-tab="odoo" role="tab">Odoo</button></div>
 <div id="out"></div>
@@ -486,7 +487,9 @@ function render() {
       for (const c of ch) h += `<tr class="${chCls(c)}"><td class="date ${chCls(c) === 'bad' ? 'c-bad' : ''}">${c.ActionBy ? c.ActionBy.slice(0, 10) + (daysTo(c) < 0 ? ' <b>overdue</b>' : ` (${daysTo(c)} d)`) : '—'}</td>${chRow(c, `<td class="date">${c.Modified.slice(0, 10)}</td>`)}${closedMc ? `<td><button class="act" data-close="${esc(c.Id)}" title="Handled or not relevant: move it to Closed, for everyone">Close</button></td>` : ''}</tr>`;
       h += '</tbody></table></div>';
     }
-    if (done.length) {
+    // Hidden unless "Show closed messages" is on (off by default); the count stays visible under the main table so a closed message is never lost.
+    if (done.length && !document.getElementById('showclosed').checked) h += `<p class="muted">${done.length} closed message${done.length > 1 ? 's' : ''} hidden: switch on "Show closed messages" at the top.</p>`;
+    else if (done.length) {
       h += `<h2 id="closedchanges">Closed <span class="muted">(${done.length}, handled or not relevant; shared by everyone)</span></h2><div class="card wrap" style="margin-bottom:20px"><table><thead><tr><th>Closed</th><th>By</th><th>Client</th><th>Change</th><th></th></tr></thead><tbody>`;
       for (const c of done) h += `<tr class="off"><td class="date">${(d => `${localDate(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`)(new Date(closedMc[c.Id].At))}</td><td>${esc(closedMc[c.Id].By || '—')}</td>${chRow(c, `<td><button class="act" data-reopen="${esc(c.Id)}" title="Back to Service changes, for everyone">Reopen</button></td>`)}</tr>`;
       h += '</tbody></table></div>';
@@ -558,6 +561,7 @@ if (tab !== 'pa') document.querySelectorAll('.tabs button').forEach(x => x.class
 document.getElementById('problems').onchange = render;
 document.getElementById('hidedisabled').onchange = render;
 document.getElementById('hidefree').onchange = render;
+document.getElementById('showclosed').onchange = render;
 document.getElementById('hidequiet').onchange = render;
 document.getElementById('q').oninput = render;
 sel.onchange = render;
