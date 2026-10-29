@@ -1,0 +1,6 @@
+{
+  "name": "support-watch-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Static Web App API: closed Message Center messages (api/closed)"
+}

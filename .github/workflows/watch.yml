@@ -58,7 +58,7 @@ jobs:
           ODOOSH_KEY:   ${{ secrets.ODOOSH_KEY }}
           # Credentials with a fixed expiry, dates only ("label=YYYY-MM-DD; label=..."): shown under the page title, mailed 14 days ahead and once expired.
           # After renewing one, store the new secret and put the new date here. Refresh tokens roll over with use and have no date.
-          EXPIRIES:     'cron-job.org token (GitHub dispatches, fine-grained)=2027-09-30'
+          EXPIRIES:     'cron-job.org token (GitHub dispatches, fine-grained)=2027-09-30; Closed messages table SAS (CLOSED_TABLE_SAS on swa-support-watch)=2028-10-29'
           # Tech watch tab, bottom section: public RSS/Atom feeds, one per line "Label | URL | optional regex on the item's title and categories",
           # read once a day. General (not per client). The M365 roadmap lists every Microsoft product, so its regex keeps the ones we support; blogs are taken whole.
           WATCH_FEEDS: |
@@ -78,6 +78,7 @@ jobs:
           action: upload
           app_location: out/site
           skip_app_build: true
+          api_location: api   # /api/closed: the Tech watch tab's closed messages (table SAS in the app setting CLOSED_TABLE_SAS)
 
       # After the deploy so a mail problem never blocks the page. A failure here turns the job red and GitHub emails the owner.
       # A run is pinned to the commit it was triggered on, so a run that waited behind another would read stale alerts.json,

@@ -87,6 +87,9 @@
   tr.off  { color:var(--muted); }
   button.copy { border:0; background:none; color:var(--muted); padding:0; margin-left:6px; cursor:pointer; font-size:12px; line-height:18px; height:18px; display:inline-flex; align-items:center; vertical-align:middle; }
   button.copy:hover { color:var(--accent); }
+  button.act { border:1px solid var(--muted); background:none; color:inherit; border-radius:4px; padding:1px 8px; font-size:12px; cursor:pointer; white-space:nowrap; }
+  button.act:hover { border-color:var(--accent); color:var(--accent); }
+  button.act:disabled { opacity:.5; cursor:wait; }
   @media (max-width: 700px) { .stat, .last { border-left:0; padding-left:0; text-align:left; } }
 </style>
 </head>
@@ -469,13 +472,23 @@ function render() {
   document.querySelector('.tabs [data-tab="news"]').innerHTML = 'Tech watch' + (chBad ? `<span class="badge">${chBad}</span>` : '');
   if (tab === 'news') {
     const CAT = { planForChange: 'Plan for change', preventOrFixIssues: 'Prevent or fix issues', stayInformed: 'Stay informed' };
-    const ch = Object.values(byId).filter(c => !only || c.ActionBy).sort((a, b) => (a.ActionBy || '9').localeCompare(b.ActionBy || '9') || b.Modified.localeCompare(a.Modified));
+    // Closed messages (handled, or not relevant) move to their own table, shared by everyone: closedMc comes from /api/closed (see the bottom of the script).
+    // closedMc null = the API did not answer (page opened as a file, API down): no Close button, everything stays in the main table.
+    const all = Object.values(byId), isClosed = c => !!(closedMc && closedMc[c.Id]);
+    const ch = all.filter(c => !isClosed(c) && (!only || c.ActionBy)).sort((a, b) => (a.ActionBy || '9').localeCompare(b.ActionBy || '9') || b.Modified.localeCompare(a.Modified));
+    const done = all.filter(isClosed).sort((a, b) => closedMc[b.Id].At.localeCompare(closedMc[a.Id].At));
+    const chRow = (c, last) => `<td>${c.clients.sort().map(esc).join(', ')}</td><td class="news"><b>${esc(c.Title)}</b>${copyBtn(c.Url)}<small>${esc(c.Summary)} <i>${[CAT[c.Category] || c.Category, c.Services, c.Tags].filter(Boolean).map(esc).join(' · ')}</i></small></td>${last}`;
     h += `<h2 id="changes">Service changes <span class="muted">(${ch.length}, Message Center, last 60 days)</span></h2>`;
     if (!(data.changes || []).length) h += '<p class="muted">No Message Center read in the last update: a client needs its MC_&lt;NAME&gt; token (see README).</p>';
     else if (!ch.length) h += '<p class="muted">Nothing to show.</p>';
     else {
-      h += '<div class="card wrap" style="margin-bottom:20px"><table><thead><tr><th>Action by</th><th>Client</th><th>Change</th><th>Updated</th></tr></thead><tbody>';
-      for (const c of ch) h += `<tr class="${chCls(c)}"><td class="date ${chCls(c) === 'bad' ? 'c-bad' : ''}">${c.ActionBy ? c.ActionBy.slice(0, 10) + (daysTo(c) < 0 ? ' <b>overdue</b>' : ` (${daysTo(c)} d)`) : '—'}</td><td>${c.clients.sort().map(esc).join(', ')}</td><td class="news"><b>${esc(c.Title)}</b>${copyBtn(c.Url)}<small>${esc(c.Summary)} <i>${[CAT[c.Category] || c.Category, c.Services, c.Tags].filter(Boolean).map(esc).join(' · ')}</i></small></td><td class="date">${c.Modified.slice(0, 10)}</td></tr>`;
+      h += `<div class="card wrap" style="margin-bottom:20px"><table><thead><tr><th>Action by</th><th>Client</th><th>Change</th><th>Updated</th>${closedMc ? '<th></th>' : ''}</tr></thead><tbody>`;
+      for (const c of ch) h += `<tr class="${chCls(c)}"><td class="date ${chCls(c) === 'bad' ? 'c-bad' : ''}">${c.ActionBy ? c.ActionBy.slice(0, 10) + (daysTo(c) < 0 ? ' <b>overdue</b>' : ` (${daysTo(c)} d)`) : '—'}</td>${chRow(c, `<td class="date">${c.Modified.slice(0, 10)}</td>`)}${closedMc ? `<td><button class="act" data-close="${esc(c.Id)}" title="Handled or not relevant: move it to Closed, for everyone">Close</button></td>` : ''}</tr>`;
+      h += '</tbody></table></div>';
+    }
+    if (done.length) {
+      h += `<h2 id="closedchanges">Closed <span class="muted">(${done.length}, handled or not relevant; shared by everyone)</span></h2><div class="card wrap" style="margin-bottom:20px"><table><thead><tr><th>Closed</th><th>By</th><th>Client</th><th>Change</th><th></th></tr></thead><tbody>`;
+      for (const c of done) h += `<tr class="off"><td class="date">${(d => `${localDate(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`)(new Date(closedMc[c.Id].At))}</td><td>${esc(closedMc[c.Id].By || '—')}</td>${chRow(c, `<td><button class="act" data-reopen="${esc(c.Id)}" title="Back to Service changes, for everyone">Reopen</button></td>`)}</tr>`;
       h += '</tbody></table></div>';
     }
     const items = (data.news || []).slice().sort((a, b) => b.Date.localeCompare(a.Date));
@@ -548,6 +561,19 @@ document.getElementById('hidefree').onchange = render;
 document.getElementById('hidequiet').onchange = render;
 document.getElementById('q').oninput = render;
 sel.onchange = render;
+// Tech watch: closed Message Center messages, shared by everyone (api/closed, a table in Azure storage). { MC123: {Title, By, At} }; null until it answers.
+let closedMc = null;
+fetch('/api/closed').then(r => r.ok ? r.json() : Promise.reject()).then(rows => { closedMc = Object.fromEntries(rows.map(r => [r.Id, r])); render(); }).catch(() => {});
+document.getElementById('out').addEventListener('click', e => {
+  const b = e.target.closest('button[data-close], button[data-reopen]'); if (!b) return;
+  const id = b.dataset.close || b.dataset.reopen, title = ((data.changes || []).find(c => c.Id === id) || {}).Title || '';
+  b.disabled = true;
+  (b.dataset.close ? fetch('/api/closed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, title }) })
+                   : fetch('/api/closed?id=' + encodeURIComponent(id), { method: 'DELETE' }))
+    .then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(t))))
+    .then(row => { if (b.dataset.close) closedMc[id] = row; else delete closedMc[id]; render(); })
+    .catch(err => { b.disabled = false; b.textContent = 'Failed'; b.title = String(err.message || err); });
+});
 render();
 // Who is signed in (Azure Static Web Apps exposes it at /.auth/me); silently absent when the page is opened locally.
 fetch('/.auth/me').then(r => r.json()).then(j => { const u = j && j.clientPrincipal; if (u) document.getElementById('signout').innerHTML = `<b>${esc(u.userDetails)}</b> · Sign out`; }).catch(() => {});

@@ -9,5 +9,6 @@
     "401": { "redirect": "/.auth/login/aad?post_login_redirect_uri=.referrer", "statusCode": 302 },
     "403": { "rewrite": "/forbidden.html", "statusCode": 403 }
   },
-  "navigationFallback": { "rewrite": "/index.html" }
+  "navigationFallback": { "rewrite": "/index.html", "exclude": ["/api/*"] },
+  "platform": { "apiRuntime": "node:20" }
 }
