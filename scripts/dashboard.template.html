@@ -101,7 +101,7 @@
   <label data-for="bi"><span class="switch"><input type="checkbox" id="hidedisabled" checked><span></span></span>Hide disabled and stale models</label>
   <label data-for="lic"><span class="switch"><input type="checkbox" id="hidefree" checked><span></span></span>Hide free, trial and expired plans</label>
 </div>
-<div class="tabs" role="tablist"><button class="active" data-tab="pa" role="tab">Power Automate</button><button data-tab="bi" role="tab">Power BI</button><button data-tab="apps" role="tab">Power Apps</button><button data-tab="lic" role="tab">Licences</button><button data-tab="cap" role="tab">Capacity</button><button data-tab="help" role="tab">Helpdesk</button><button data-tab="odoo" role="tab">Odoo</button><button data-tab="news" role="tab">Tech watch</button></div>
+<div class="tabs" role="tablist"><button class="active" data-tab="pa" role="tab">Power Automate</button><button data-tab="bi" role="tab">Power BI</button><button data-tab="apps" role="tab">Power Apps</button><button data-tab="lic" role="tab">Licences</button><button data-tab="cap" role="tab">Capacity</button><button data-tab="news" role="tab">Tech watch</button><button data-tab="help" role="tab">Helpdesk</button><button data-tab="odoo" role="tab">Odoo</button></div>
 <div id="out"></div>
 <script>
 // Pre-aggregated by build-dashboard.ps1: { snapshots: {client: collectedAt}, flows: [per flow], days: [per client per day], fails: [failed runs] }
@@ -396,7 +396,9 @@ function render() {
     else if (!tk.length) h += '<p class="muted">No ticket in progress.</p>';
     else {
       h += `<h2 id="tickets">Tickets in progress <span class="muted">(${tk.length})</span></h2><div class="card wrap"><table><thead><tr><th>Client</th><th>Ticket</th><th>Priority</th><th>Assigned to</th><th>Created</th><th>Last update</th><th>SLA deadline</th></tr></thead><tbody>`;
-      for (const t of tk) h += `<tr class="${late(t) ? 'bad' : ''}"><td>${esc(t.Customer || '—')}</td><td class="flow">#${esc(t.Ref)} ${esc(t.Ticket)}${copyBtn(t.Url)}</td><td class="${t.Priority === 'Urgent' ? 'c-bad' : t.Priority === 'High' ? 'c-warn' : ''}">${esc(t.Priority || '—')}</td><td>${esc(t.Assignee || '—')}</td><td class="date">${fmt(t.Created)}</td><td class="date">${fmt(t.Updated)}</td><td class="date ${late(t) ? 'c-bad' : ''}">${fmt(t.Deadline)}</td></tr>`;
+      // Both databases (Odoo Online and Odoo.sh) during the move: each ticket then says which one it lives in.
+      const twoSources = new Set(tkAll.map(t => t.Source)).size > 1;
+      for (const t of tk) h += `<tr class="${late(t) ? 'bad' : ''}"><td>${esc(t.Customer || '—')}</td><td class="flow">#${esc(t.Ref)} ${esc(t.Ticket)}${twoSources && t.Source ? ` <span class="muted">(${esc(t.Source)})</span>` : ''}${copyBtn(t.Url)}</td><td class="${t.Priority === 'Urgent' ? 'c-bad' : t.Priority === 'High' ? 'c-warn' : ''}">${esc(t.Priority || '—')}</td><td>${esc(t.Assignee || '—')}</td><td class="date">${fmt(t.Created)}</td><td class="date">${fmt(t.Updated)}</td><td class="date ${late(t) ? 'c-bad' : ''}">${fmt(t.Deadline)}</td></tr>`;
       h += '</tbody></table></div>';
     }
     document.getElementById('out').innerHTML = h;

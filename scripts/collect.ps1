@@ -11,7 +11,8 @@
 #                  Power Apps needs no option: every listed environment's canvas apps and connections go to powerapps.csv and
 #                  connections.csv (same refresh token exchanged for a Power Apps API token, Graph for the owners' account state)
 #   ODOO_URL, ODOO_USER, ODOO_KEY  optional: the Odoo Helpdesk tickets in progress go to tickets.csv (see the Helpdesk block)
-#   ODOOSH_URL, ODOOSH_DB, ODOOSH_USER, ODOOSH_KEY  optional: the Odoo.sh database's health and changes go to odoo.csv (see the Odoo block)
+#   ODOOSH_URL, ODOOSH_DB, ODOOSH_USER, ODOOSH_KEY  optional: the Odoo.sh database's health and changes go to odoo.csv (see the Odoo block),
+#                  its tickets in progress to tickets.csv next to Odoo Online's
 #   WATCH_FEEDS    optional: public RSS/Atom feeds for the Tech watch tab, one per line "Label | URL | optional regex" (see the Tech watch block)
 #   MC_<NAME>      optional per client: a second refresh token (get-refresh-token.ps1 -MessageCenter) that reads the client's Microsoft 365
 #                  Message Center into changes.csv (the service changes section of the Tech watch tab) and the audit log's app launches into
@@ -273,21 +274,23 @@ foreach ($c in $clients) {
     } catch { $failures += "$($c.Name): Power Apps collection failed: $(& $why $_.Exception)" }
 }
 
-# Helpdesk: the Odoo tickets in the "In Progress" stage. One Odoo database for all clients, so collected once, from the cloud job only
-# (ODOO_URL, ODOO_USER, ODOO_KEY: a user API key, which works with 2FA; the database name is the host's first label, Odoo Online's rule).
+# Helpdesk: the Odoo tickets in the "In Progress" stage, from both databases while the helpdesk moves: Odoo Online (ODOO_URL, ODOO_USER, ODOO_KEY;
+# the database name is the host's first label, Odoo Online's rule) and Odoo.sh (the Odoo tab's ODOOSH_* secrets, database name given). Each ticket
+# carries its Source. One database for all clients, so collected once, from the cloud job only. Keys are user API keys, which work with 2FA.
 # A ticket's client: the CLIENTS_JSON entry whose optional "Odoo" field equals the customer's company in Odoo, else the one whose tenant's
 # first label is contained in that company name (seguinmorris.com ~ "Séguin Morris Inc") or whose Name appears in it as a word ("... (TSMO)"). Unmatched tickets keep Client = '' (shown under All clients).
-$tickets = [System.Collections.Generic.List[object]]::new(); $helpdeskAt = ''   # snapshot time of the ticket list (its own line in the page header); '' = not collected this run
-if ($env:ODOO_URL -and $env:ODOO_KEY) {
+$tickets = [System.Collections.Generic.List[object]]::new(); $helpdeskAt = ''   # snapshot time of the ticket list (its own line in the page header); '' = no database read this run
+$hdSources = @(@{ Name = 'Odoo Online'; Url = $env:ODOO_URL; Db = ''; User = $env:ODOO_USER; Key = $env:ODOO_KEY }, @{ Name = 'Odoo.sh'; Url = $env:ODOOSH_URL; Db = $env:ODOOSH_DB; User = $env:ODOOSH_USER; Key = $env:ODOOSH_KEY })
+foreach ($hs in $hdSources | Where-Object { $_.Url -and $_.Key }) {
     try {
-        $ou = $env:ODOO_URL.TrimEnd('/'); $odb = ([uri]$ou).Host.Split('.')[0]
+        $ou = $hs.Url.TrimEnd('/'); $odb = if ($hs.Db) { $hs.Db } else { ([uri]$ou).Host.Split('.')[0] }
         $rpc = { param($svc, $m, $a)
             $r = Invoke-RestMethod -Method Post -Uri "$ou/jsonrpc" -ContentType 'application/json' -TimeoutSec 60 -Body (@{ jsonrpc = '2.0'; method = 'call'; id = 1; params = @{ service = $svc; method = $m; args = $a } } | ConvertTo-Json -Depth 10 -Compress)
             if ($r.error) { throw "$($r.error.data.message ?? $r.error.message)" }; $r.result }
-        $uid = & $rpc common authenticate @($odb, $env:ODOO_USER, $env:ODOO_KEY, @{})
-        if (-not $uid) { throw 'sign-in refused (ODOO_USER or ODOO_KEY)' }
+        $uid = & $rpc common authenticate @($odb, $hs.User, $hs.Key, @{})
+        if (-not $uid) { throw 'sign-in refused (user or API key)' }
         $fields = 'ticket_ref', 'name', 'commercial_partner_id', 'stage_id', 'priority', 'user_id', 'create_date', 'write_date', 'sla_deadline'
-        $list = @(& $rpc object execute_kw @($odb, $uid, $env:ODOO_KEY, 'helpdesk.ticket', 'search_read', @(, @(, @('stage_id.name', '=', 'In Progress'))), @{ fields = $fields }))
+        $list = @(& $rpc object execute_kw @($odb, $uid, $hs.Key, 'helpdesk.ticket', 'search_read', @(, @(, @('stage_id.name', '=', 'In Progress'))), @{ fields = $fields }))
         # Odoo returns false for an empty field and [id, name] for a relation; its dates are naive UTC strings.
         $m2o  = { param($v) if ($v -is [array]) { "$($v[1])" } else { '' } }
         $odt  = { param($v) if ($v -is [string] -and $v) { & $toLocal ($v.Replace(' ', 'T') + 'Z') } else { '' } }
@@ -299,11 +302,11 @@ if ($env:ODOO_URL -and $env:ODOO_KEY) {
             $cl = @($clients | Where-Object { ($_.Odoo -and $_.Odoo -eq $cust) -or ($cust -match "\b$([regex]::Escape($_.Name))\b") -or ($_.Tenant -and (& $norm $cust).Contains((& $norm $_.Tenant.Split('.')[0]))) })
             $tickets.Add([pscustomobject]@{ Client = "$(@($cl)[0].Name)"; Customer = $cust; Ref = "$($t.ticket_ref)"; Ticket = "$($t.name)"; Stage = (& $m2o $t.stage_id)
                 Priority = "$($prio["$($t.priority)"])"; Assignee = (& $m2o $t.user_id); Created = (& $odt $t.create_date); Updated = (& $odt $t.write_date); Deadline = (& $odt $t.sla_deadline)
-                Url = "$ou/odoo/helpdesk/$($t.id)" })
+                Url = "$ou/odoo/helpdesk/$($t.id)"; Source = $hs.Name })
         }
         $helpdeskAt = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s')
-        Write-Host "Helpdesk: $($tickets.Count) ticket(s) in progress"
-    } catch { $failures += "Helpdesk collection failed: $(& $why $_.Exception)" }
+        Write-Host "Helpdesk ($($hs.Name)): $($list.Count) ticket(s) in progress"
+    } catch { $failures += "Helpdesk ($($hs.Name)) collection failed: $(& $why $_.Exception)" }
 }
 
 # Odoo tab: the health of the Odoo.sh database and who changed what in it (ODOOSH_URL, ODOOSH_DB, ODOOSH_USER, ODOOSH_KEY: an admin user's API key,

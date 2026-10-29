@@ -39,7 +39,8 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   account, other users' personal connections are not ours to watch): a connection whose status is not Connected and an app whose
   owner account is disabled or deleted in Entra are red and counted in the tab's badge. With a Power Platform admin role the
   whole environment is listed; otherwise only what the signed-in account can see.
-- The cloud job also reads, once (one Odoo database for all clients), the **Odoo Helpdesk** tickets whose stage is `In Progress`
+- The cloud job also reads, once (one Odoo database for all clients; both Odoo Online, `ODOO_*`, and Odoo.sh, `ODOOSH_*`, while the
+  helpdesk moves, each ticket labelled with its source when both have some), the **Odoo Helpdesk** tickets whose stage is `In Progress`
   (`out/tickets.csv`, Helpdesk tab: a ticket past its SLA deadline is red and counted in the tab's badge). A ticket belongs to the client
   whose optional `"Odoo"` field in `CLIENTS_JSON` equals the ticket customer's company, or whose tenant's first label is contained in that
   company name (`seguinmorris.com` ~ `Séguin Morris Inc`); the others show under All clients only.
