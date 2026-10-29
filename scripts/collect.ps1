@@ -11,6 +11,7 @@
 #                  Power Apps needs no option: every listed environment's canvas apps and connections go to powerapps.csv and
 #                  connections.csv (same refresh token exchanged for a Power Apps API token, Graph for the owners' account state)
 #   ODOO_URL, ODOO_USER, ODOO_KEY  optional: the Odoo Helpdesk tickets in progress go to tickets.csv (see the Helpdesk block)
+#   ODOOSH_URL, ODOOSH_DB, ODOOSH_USER, ODOOSH_KEY  optional: the Odoo.sh database's health and changes go to odoo.csv (see the Odoo block)
 #   WATCH_FEEDS    optional: public RSS/Atom feeds for the Tech watch tab, one per line "Label | URL | optional regex" (see the Tech watch block)
 #   MC_<NAME>      optional per client: a second refresh token (get-refresh-token.ps1 -MessageCenter) that reads the client's Microsoft 365
 #                  Message Center into changes.csv (the service changes section of the Tech watch tab) and the audit log's app launches into
@@ -305,6 +306,60 @@ if ($env:ODOO_URL -and $env:ODOO_KEY) {
     } catch { $failures += "Helpdesk collection failed: $(& $why $_.Exception)" }
 }
 
+# Odoo tab: the health of the Odoo.sh database and who changed what in it (ODOOSH_URL, ODOOSH_DB, ODOOSH_USER, ODOOSH_KEY: an admin user's API key,
+# the models below are admin-only). Separate from the Helpdesk block, which still reads the Odoo Online tickets. One row per finding in odoo.csv:
+#   health  /web/health, and the neutralization flag (a production database must never be neutralized: no mail, crons off)
+#   module  ridgebase_support's state and version: a deploy shows as a new version and date
+#   cron    active scheduled actions that failed (failure_count) or are 2 h past their next call
+#   mail    outgoing mails in exception, or still queued after an hour
+#   change  tracked field changes, 7 days. Odoo 20 has no mail.tracking.value: a change is a mail.message of type 'tracking', "old → new (Field)"
+#           in its preview. It covers users, groups, access rules and scheduled actions too. OdooBot's (module installs, crons) left out.
+#   edit    records of the untracked config models edited in 7 days: who and when, not what (write_uid/write_date keep the last edit only)
+#   login   sign-ins, 7 days (res.users.log), except ODOOSH_USER's: this job's own sign-in leaves a row every run. Hence a dedicated user, not a person's.
+$odoo = [System.Collections.Generic.List[object]]::new(); $odooAt = ''
+if ($env:ODOOSH_URL -and $env:ODOOSH_KEY) {
+    try {
+        $su = $env:ODOOSH_URL.TrimEnd('/'); $sdb = $env:ODOOSH_DB
+        $add = { param($kind, $when, $who, $model, $record, $what, $url = '') $odoo.Add([pscustomobject]@{ Kind = $kind; When = $when; Who = $who; Model = $model; Record = $record; What = $what; Url = $url }) }
+        $health = try { "$((Invoke-RestMethod "$su/web/health" -TimeoutSec 30).status)" } catch { & $why $_.Exception }
+        & $add health '' '' '' '' $health
+        if ($health -eq 'pass') {
+            $srpc = { param($svc, $m, $a)
+                $r = Invoke-RestMethod -Method Post -Uri "$su/jsonrpc" -ContentType 'application/json' -TimeoutSec 60 -Body (@{ jsonrpc = '2.0'; method = 'call'; id = 1; params = @{ service = $svc; method = $m; args = $a } } | ConvertTo-Json -Depth 10 -Compress)
+                if ($r.error) { throw "$($r.error.data.message ?? $r.error.message)" }; $r.result }
+            $suid = & $srpc common authenticate @($sdb, $env:ODOOSH_USER, $env:ODOOSH_KEY, @{})
+            if (-not $suid) { throw 'sign-in refused (ODOOSH_USER or ODOOSH_KEY)' }
+            $q = { param($model, $domain, $fields, $order = 'id desc') @(& $srpc object execute_kw @($sdb, $suid, $env:ODOOSH_KEY, $model, 'search_read', @(, $domain), @{ fields = $fields; order = $order; limit = 200 })) }
+            $m2o = { param($v) if ($v -is [array]) { "$($v[1])" } else { '' } }
+            $sdt = { param($v) if ($v -is [string] -and $v) { & $toLocal ($v.Replace(' ', 'T') + 'Z') } else { '' } }   # Odoo dates: naive UTC strings
+            $ago = { param($h) [datetime]::UtcNow.AddHours(-$h).ToString('yyyy-MM-dd HH:mm:ss') }
+            $rec = { param($model, $id) "$su/web#model=$model&id=$id" }
+            if (@(& $q ir.config_parameter @(, @('key', '=', 'database.is_neutralized')) @('value')).Count) { & $add health '' '' '' '' 'Database neutralized: no mail goes out and the crons are off' }
+            foreach ($m in & $q ir.module.module @(, @('name', '=', 'ridgebase_support')) @('state', 'installed_version', 'write_date')) { & $add module (& $sdt $m.write_date) '' '' 'ridgebase_support' "$($m.state) $($m.installed_version)" }
+            foreach ($c in & $q ir.cron @(, @('failure_count', '>', 0)) @('cron_name', 'failure_count', 'first_failure_date')) {
+                & $add cron (& $sdt $c.first_failure_date) '' 'Scheduled action' $c.cron_name "Failed $($c.failure_count) time(s) in a row" (& $rec ir.cron $c.id) }
+            foreach ($c in & $q ir.cron @(@('failure_count', '=', 0), @('nextcall', '<', (& $ago 2))) @('cron_name', 'nextcall')) {
+                & $add cron (& $sdt $c.nextcall) '' 'Scheduled action' $c.cron_name 'Overdue: not run since its due time' (& $rec ir.cron $c.id) }
+            foreach ($m in & $q mail.mail @('|', @('state', '=', 'exception'), '&', @('state', '=', 'outgoing'), @('create_date', '<', (& $ago 1))) @('subject', 'state', 'failure_reason', 'create_date')) {
+                & $add mail (& $sdt $m.create_date) '' 'Email' "$($m.subject)" $(if ($m.state -eq 'exception') { "Failed: $($m.failure_reason)" } else { 'Still queued after an hour' }) }
+            $week = & $ago 168
+            foreach ($m in & $q mail.message @(@('message_type', '=', 'tracking'), @('date', '>=', $week), @('create_uid', '!=', 1)) @('date', 'model', 'res_id', 'record_name', 'author_id', 'preview') 'date desc') {
+                & $add change (& $sdt $m.date) (& $m2o $m.author_id) $m.model "$($m.record_name)" "$($m.preview)" (& $rec $m.model $m.res_id) }
+            # ponytail: hand-kept list of the config models without tracking; a model missing from this database (base.automation without its module) is skipped.
+            foreach ($model in 'helpdesk.team', 'helpdesk.stage', 'helpdesk.sla', 'helpdesk.tag', 'base.automation', 'ir.actions.server', 'mail.template', 'ir.mail_server', 'fetchmail.server', 'ir.config_parameter') {
+                try { $list = & $q $model @(@('write_date', '>=', $week), @('write_uid', '!=', 1)) @('display_name', 'write_date', 'write_uid') 'write_date desc' } catch { continue }
+                foreach ($r in $list) { & $add edit (& $sdt $r.write_date) (& $m2o $r.write_uid) $model "$($r.display_name)" 'Edited (this model keeps no change history)' (& $rec $model $r.id) }
+            }
+            foreach ($l in & $q res.users.log @(@('create_date', '>=', $week), @('create_uid', '!=', $suid)) @('create_date', 'create_uid')) { & $add login (& $sdt $l.create_date) (& $m2o $l.create_uid) '' '' '' }
+            # Model labels ("User" rather than res.users) for the change and edit rows.
+            $models = @($odoo | Where-Object Kind -in 'change', 'edit' | ForEach-Object Model | Sort-Object -Unique)
+            if ($models) { $label = @{}; foreach ($m in & $q ir.model @(, @('model', 'in', $models)) @('model', 'name')) { $label[$m.model] = $m.name }; foreach ($r in $odoo) { if ($label[$r.Model]) { $r.Model = $label[$r.Model] } } }
+        }
+        $odooAt = [TimeZoneInfo]::ConvertTimeFromUtc([datetime]::UtcNow, $tz).ToString('s')
+        Write-Host "Odoo: health $health, $(@($odoo | Where-Object Kind -in 'cron', 'mail').Count) problem(s), $(@($odoo | Where-Object Kind -in 'change', 'edit').Count) change(s), $(@($odoo | Where-Object Kind -eq 'login').Count) sign-in(s)"
+    } catch { $failures += "Odoo collection failed: $(& $why $_.Exception)" }
+}
+
 # Tech watch, part 1: service changes. Each client's Microsoft 365 Message Center (Graph serviceAnnouncement/messages) is the one place Microsoft
 # announces retirements, licensing and policy changes, with the services affected and an action date. The Flow refresh token cannot read it (the
 # Azure CLI app is not pre-authorized for ServiceMessage.Read.All), hence MC_<NAME>, a second token made by get-refresh-token.ps1 -MessageCenter
@@ -494,12 +549,13 @@ if ($pbiRuns.Count) { $pbiRuns | Export-Csv -Path "$out/powerbi-runs.csv" -NoTyp
 if ($apps.Count) { $apps | Export-Csv -Path "$out/powerapps.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/powerapps.csv" -ErrorAction SilentlyContinue }
 if ($conns.Count) { $conns | Export-Csv -Path "$out/connections.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/connections.csv" -ErrorAction SilentlyContinue }
 if ($tickets.Count) { $tickets | Export-Csv -Path "$out/tickets.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/tickets.csv" -ErrorAction SilentlyContinue }
+if ($odoo.Count) { $odoo | Export-Csv -Path "$out/odoo.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/odoo.csv" -ErrorAction SilentlyContinue }
 if ($changes.Count) { $changes | Export-Csv -Path "$out/changes.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/changes.csv" -ErrorAction SilentlyContinue }
 if ($licences.Count) { $licences | Export-Csv -Path "$out/licences.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/licences.csv" -ErrorAction SilentlyContinue }
 if ($tenants.Count) { $tenants | Export-Csv -Path "$out/tenants.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/tenants.csv" -ErrorAction SilentlyContinue }
 if ($licusers.Count) { $licusers | Export-Csv -Path "$out/licusers.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/licusers.csv" -ErrorAction SilentlyContinue }
 if ($envcap.Count) { $envcap | Export-Csv -Path "$out/envcap.csv" -NoTypeInformation -Encoding UTF8 } else { Remove-Item "$out/envcap.csv" -ErrorAction SilentlyContinue }
-& "$PSScriptRoot/build-dashboard.ps1" -HelpdeskAt $helpdeskAt
+& "$PSScriptRoot/build-dashboard.ps1" -HelpdeskAt $helpdeskAt -OdooAt $odooAt
 $failures | ForEach-Object { Write-Warning $_ }
 # Fail the job (GitHub emails the repo owner) only when nothing at all was collected: the collector itself is broken.
 if ($blocked.Count -eq @($clients).Count) { exit 1 }

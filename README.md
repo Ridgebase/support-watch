@@ -43,6 +43,11 @@ to the colleague (free tier: up to 25 users). The deploy token lives in the `AZU
   (`out/tickets.csv`, Helpdesk tab: a ticket past its SLA deadline is red and counted in the tab's badge). A ticket belongs to the client
   whose optional `"Odoo"` field in `CLIENTS_JSON` equals the ticket customer's company, or whose tenant's first label is contained in that
   company name (`seguinmorris.com` ~ `Séguin Morris Inc`); the others show under All clients only.
+- The **Odoo** tab watches the Odoo.sh database (`ODOOSH_*`, separate from the Helpdesk tab's Odoo Online): `/web/health`, the neutralization
+  flag, the `ridgebase_support` module's version, failing or overdue scheduled actions and mails in error (red, in the tab's badge), then the
+  changes of the last 7 days (Odoo 20's tracking messages, "old → new (Field)", which also cover users, groups, access rules and crons; plus
+  the untracked config models such as helpdesk teams, stages and SLAs, edited by whom and when) and the sign-ins per user (`out/odoo.csv`). `ODOOSH_USER` should be a dedicated user: its own sign-ins
+  (one per run) are left out.
 - The **Licences** tab: per client, from Graph with the same refresh token (`licences.csv`, `tenants.csv`, `licusers.csv`, SEMO's carried over),
   one row per plan with the seats bought, assigned, in grace or suspended and the next renewal date, the enabled user count, and the disabled
   accounts that still hold a paid licence. Red (and the tab's badge): more seats assigned than bought, seats in grace, a plan not enabled, a renewal
@@ -92,6 +97,7 @@ All client-specific values live in GitHub secrets, nothing in this repo:
 | `RT_<NAME>`     | one per client, the refresh token written by `get-refresh-token.ps1`                       |
 | `CARRY_URL`     | raw URL of the gist where the laptop collector publishes its `data.json` (see below)              |
 | `ODOO_URL`, `ODOO_USER`, `ODOO_KEY` | the Odoo database (`https://<db>.odoo.com`), the user and their API key (Preferences > Account Security) for the Helpdesk tab |
+| `ODOOSH_URL`, `ODOOSH_DB`, `ODOOSH_USER`, `ODOOSH_KEY` | the Odoo.sh database (URL and full database name, from the branch's build), an admin user and their API key, for the Odoo tab |
 
 `CARRY_CLIENTS` (plain env in `watch.yml`, currently `SEMO`) names the clients the job never collects itself: they come
 from `CARRY_URL` only, i.e. from the Azure function, even on the days SEMO's Conditional Access lets GitHub's runners in.

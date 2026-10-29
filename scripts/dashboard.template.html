@@ -34,8 +34,8 @@
   .controls label[data-for] { display:none; }   /* the second switch depends on the tab */
   body[data-tab="pa"] .controls label[data-for="pa"], body[data-tab="bi"] .controls label[data-for="bi"], body[data-tab="apps"] .controls label[data-for="apps"], body[data-tab="lic"] .controls label[data-for="lic"] { display:inline-flex; }
   td.text { white-space:normal; min-width:160px; max-width:560px; }   /* error messages and connector lists wrap too */
-  body[data-tab="apps"] th, body[data-tab="apps"] td, body[data-tab="help"] th, body[data-tab="help"] td, body[data-tab="news"] th, body[data-tab="news"] td { white-space:normal; }
-  body[data-tab="apps"] td.date, body[data-tab="help"] td.date, body[data-tab="news"] td.date { white-space:nowrap; }
+  body[data-tab="apps"] th, body[data-tab="apps"] td, body[data-tab="help"] th, body[data-tab="help"] td, body[data-tab="news"] th, body[data-tab="news"] td, body[data-tab="odoo"] th, body[data-tab="odoo"] td { white-space:normal; }
+  body[data-tab="apps"] td.date, body[data-tab="help"] td.date, body[data-tab="news"] td.date, body[data-tab="odoo"] td.date { white-space:nowrap; }
   td.news a { color:inherit; font-weight:600; text-decoration:none; } td.news a:hover { color:var(--accent); text-decoration:underline; } td.news small { display:block; color:var(--muted); margin-top:2px; }   /* Tech watch: public Microsoft pages, so real links (the no-link rule is for client resources) */   /* a date split over two lines reads badly */   /* every cell may wrap: the tables then always fit the page width, no sideways scroll */
   select { appearance:none; -webkit-appearance:none; font:inherit; color:var(--fg); background:var(--card) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' fill='none' stroke='%2376706a' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 10px center / 12px; border:1px solid var(--line); border-radius:6px; padding:6px 30px 6px 10px; min-width:160px; cursor:pointer; }
   select:hover { border-color:var(--muted); }
@@ -101,7 +101,7 @@
   <label data-for="bi"><span class="switch"><input type="checkbox" id="hidedisabled" checked><span></span></span>Hide disabled and stale models</label>
   <label data-for="lic"><span class="switch"><input type="checkbox" id="hidefree" checked><span></span></span>Hide free, trial and expired plans</label>
 </div>
-<div class="tabs" role="tablist"><button class="active" data-tab="pa" role="tab">Power Automate</button><button data-tab="bi" role="tab">Power BI</button><button data-tab="apps" role="tab">Power Apps</button><button data-tab="lic" role="tab">Licences</button><button data-tab="cap" role="tab">Capacity</button><button data-tab="help" role="tab">Helpdesk</button><button data-tab="news" role="tab">Tech watch</button></div>
+<div class="tabs" role="tablist"><button class="active" data-tab="pa" role="tab">Power Automate</button><button data-tab="bi" role="tab">Power BI</button><button data-tab="apps" role="tab">Power Apps</button><button data-tab="lic" role="tab">Licences</button><button data-tab="cap" role="tab">Capacity</button><button data-tab="help" role="tab">Helpdesk</button><button data-tab="odoo" role="tab">Odoo</button><button data-tab="news" role="tab">Tech watch</button></div>
 <div id="out"></div>
 <script>
 // Pre-aggregated by build-dashboard.ps1: { snapshots: {client: collectedAt}, flows: [per flow], days: [per client per day], fails: [failed runs] }
@@ -133,7 +133,7 @@ const sel = document.getElementById('client');
 // Clients, then the helpdesk customers that matched no client (see collect.ps1): picking one filters the Helpdesk tab by customer.
 const unmapped = [...new Set((data.tickets || []).filter(t => !t.Client).map(t => t.Customer).filter(Boolean))].sort();
 for (const c of [...Object.keys(latest).sort(), ...unmapped]) sel.append(new Option(c, c));
-const snaps = [...Object.entries(latest), ...(data.helpdesk ? [['Helpdesk', data.helpdesk]] : []), ...(data.newsAt ? [['Tech watch', data.newsAt]] : [])];
+const snaps = [...Object.entries(latest), ...(data.helpdesk ? [['Helpdesk', data.helpdesk]] : []), ...(data.odooAt ? [['Odoo', data.odooAt]] : []),...(data.newsAt ? [['Tech watch', data.newsAt]] : [])];
 // "Last update: SEMO 14:03 · TSMO 14:05 · Helpdesk 14:03": the time alone when it is today's, the date too otherwise.
 // STALE = the scheduled task has not run for an hour: the page is old, not the flows.
 const hm = iso => iso.slice(0, 10) === localDate(new Date()) ? iso.slice(11, 16) : fmt(iso);
@@ -403,6 +403,51 @@ function render() {
     return;
   }
 
+  // Odoo: the Odoo.sh database (one for all clients, so the client filter does not apply). Red and in the tab's badge: health not "pass"
+  // (or the database neutralized), the module not installed, a failing or overdue scheduled action, a mail in error or stuck in the queue.
+  // Below: the changes of the last 7 days (tracked fields with old → new, and edits of untracked config records: who and when only), then sign-ins per user.
+  const od = data.odoo || [], odOf = k => od.filter(r => r.Kind === k);
+  const odBad = [...odOf('health').filter(r => r.What !== 'pass'), ...odOf('module').filter(r => !r.What.startsWith('installed')), ...odOf('cron'), ...odOf('mail')];
+  document.querySelector('.tabs [data-tab="odoo"]').innerHTML = 'Odoo' + (odBad.length ? `<span class="badge">${odBad.length}</span>` : '');
+  if (tab === 'odoo') {
+    const changes = [...odOf('change'), ...odOf('edit')].sort((a, b) => b.When.localeCompare(a.When)), logins = odOf('login'), mod = odOf('module')[0];
+    const [label, tone] = !data.odooAt ? ['Not collected', 'grey'] : Date.now() - new Date(data.odooAt) > STALE_MS ? ['Stale data', 'grey']
+      : odOf('health').some(r => r.What !== 'pass') ? ['Database not healthy', 'bad'] : odBad.length ? [`${odBad.length} problem${odBad.length > 1 ? 's' : ''}`, 'bad'] : ['Healthy', 'ok'];
+    h += `<div class="card health">
+      <div class="status"><span class="dot" style="background:var(--${tone})"></span><b class="c-${tone}">${label}</b></div>
+      <div class="stat ${odBad.length ? 'c-bad' : ''}"><a href="#odproblems" class="big">${odBad.length}</a><small>Problems</small></div>
+      <div class="kpi"><a href="#odchanges" class="big" style="color:inherit;text-decoration:none">${changes.length}</a><small>Changes, 7 d</small></div>
+      <div class="stat"><a href="#odlogins" class="big" style="color:inherit;text-decoration:none">${new Set(logins.map(l => l.Who)).size}</a><small>Users signed in, 7 d</small></div>
+      <div class="stat"><div class="big">${mod ? esc(mod.What.split(' ')[1] || '—') : '—'}</div><small>ridgebase_support${mod?.When ? ', ' + fmt(mod.When).slice(0, 10) : ''}</small></div>
+    </div>`;
+    if (!data.odooAt) h += '<p class="muted">Odoo not collected in the last update (ODOOSH_* secrets; see the job log).</p>';
+    if (odBad.length) {
+      h += `<h2 id="odproblems">Problems <span class="muted">(${odBad.length})</span></h2><div class="card wrap" style="margin-bottom:20px"><table><thead><tr><th>Since</th><th>What</th><th>Problem</th></tr></thead><tbody>`;
+      for (const r of odBad) h += `<tr class="bad"><td class="date">${fmt(r.When)}</td><td class="flow">${esc([r.Model || (r.Kind === 'health' ? 'Database' : r.Kind === 'module' ? 'Module' : ''), r.Record].filter(Boolean).join(': '))}${copyBtn(r.Url)}</td><td class="text">${esc(r.What)}</td></tr>`;
+      h += '</tbody></table></div>';
+    }
+    if (data.odooAt && !only) {
+      h += `<h2 id="odchanges">Changes <span class="muted">(${changes.length}, last 7 days, OdooBot's left out)</span></h2>`;
+      if (!changes.length) h += '<p class="muted">No change.</p>';
+      else {
+        h += '<div class="card wrap" style="margin-bottom:20px"><table><thead><tr><th>When</th><th>Who</th><th>Record</th><th>Change</th></tr></thead><tbody>';
+        for (const r of changes) h += `<tr><td class="date">${fmt(r.When)}</td><td>${esc(r.Who || '—')}</td><td class="flow">${esc(r.Model)}: ${esc(r.Record || '—')}${copyBtn(r.Url)}</td><td class="text ${r.Kind === 'edit' ? 'muted' : ''}">${esc(r.What)}</td></tr>`;
+        h += '</tbody></table></div>';
+      }
+      const byUser = {}; for (const l of logins) { const u = byUser[l.Who] ??= { who: l.Who, n: 0, last: '' }; u.n++; if (l.When > u.last) u.last = l.When; }
+      const users = Object.values(byUser).sort((a, b) => b.last.localeCompare(a.last));
+      h += `<h2 id="odlogins">Sign-ins <span class="muted">(${users.length} user${users.length === 1 ? '' : 's'}, last 7 days, this page's own account left out)</span></h2>`;
+      if (!users.length) h += '<p class="muted">No sign-in.</p>';
+      else {
+        h += '<div class="card wrap"><table><thead><tr><th>User</th><th class="num">Sign-ins</th><th>Last sign-in</th></tr></thead><tbody>';
+        for (const u of users) h += `<tr><td>${esc(u.who || '—')}</td><td class="num">${u.n}</td><td class="date">${fmt(u.last)}</td></tr>`;
+        h += '</tbody></table></div>';
+      }
+    }
+    document.getElementById('out').innerHTML = h;
+    return;
+  }
+
   // Tech watch. Top: service changes from each client's Microsoft 365 Message Center (retirements, licensing and policy changes, with the services
   // affected and an action date), one row per message with the clients it was seen in (the same MC id shows in every tenant). No row colour and no tab badge:
   // the user asked for it on 2026-10-28, most messages need no action on their side (chCls kept as the hook, it returned bad/warn before). "Problems only" keeps the rows with an action date. Bottom: blog posts and roadmap items (WATCH_FEEDS, read
@@ -478,8 +523,8 @@ document.getElementById('out').addEventListener('click', e => {
   const b = e.target.closest('button.copy'); if (!b) return;
   navigator.clipboard.writeText(b.dataset.url).then(() => { b.textContent = '✓'; setTimeout(() => b.innerHTML = COPY_SVG, 1200); });
 });
-// Tabs: pa (default, no hash), bi (#bi), apps (#apps), lic (#lic), cap (#cap), help (#help), news (#news).
-let tab = ['bi', 'apps', 'lic', 'cap', 'help', 'news'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'pa';
+// Tabs: pa (default, no hash), bi (#bi), apps (#apps), lic (#lic), cap (#cap), help (#help), odoo (#odoo), news (#news).
+let tab = ['bi', 'apps', 'lic', 'cap', 'help', 'odoo', 'news'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'pa';
 const tabHash = () => tab === 'pa' ? '' : '#' + tab;
 document.querySelector('.tabs').addEventListener('click', e => {
   const b = e.target.closest('button[data-tab]'); if (!b) return;
